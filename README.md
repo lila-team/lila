@@ -1,4 +1,4 @@
-# Lila CLI
+[<img src="assets/logo.png">](https://lila.dev/)
 
 [![PyPI version](https://badge.fury.io/py/lilacli.svg)](https://badge.fury.io/py/lilacli)
 [![Documentation Status](https://readthedocs.org/projects/lila/badge/?version=latest)](https://docs.lila.dev)
@@ -7,13 +7,16 @@ Lila CLI is a powerful tool for running end-to-end tests written in human-readab
 
 **No coding required.**
 
+Visit Lila at [https://lila.dev](https://lila.dev)
+
 ### How does it work?
 
-Lila runs your app in a **local browser** with [Playwright](https://playwright.dev/python/) and uses an AI engine to guide the CLI run the high level instructions.
+Lila runs your app in a **local browser** with [Playwright](https://playwright.dev/python/) and uses an LLM-powered engine to guide the CLI run the high level instructions.
 
 ### Why Lila?
 
 * No coding required
+* Self healing tests, does not rely on low level implementation
 * Anyone in the team can implement tests
 * Integrates natively with Playwright storage states
 * Runs browser locally, making it ideal for localdev or staging environments
