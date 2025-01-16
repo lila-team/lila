@@ -1,0 +1,11 @@
+[browser]
+type = "chromium"
+width = 1536
+height = 1152
+headless = true
+
+[runtime]
+fail_fast = true
+output_dir = "lila-tests/out"
+concurrent_workers = 4
+server_url = 'https://app.lila.dev'
