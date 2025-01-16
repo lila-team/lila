@@ -118,3 +118,5 @@ Find a variety of test examples in our [examples repository](https://github.com/
 ## Contact
 
 Reach out at info@lila.dev
+
+Join our [Discord server](https://discord.gg/6rRfZUqh)
