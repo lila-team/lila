@@ -1,0 +1,12 @@
+tags:
+  - no-auth
+
+
+steps:
+  - goto: https://calendly.com/surfing-devs/30min
+  - verify: there is a calendar panel on the right with the current month
+  - click: on the next available Monday
+  - verify: there is a list of available hours on the right
+  - click: on the first available time slot
+  - click: to confirm selection
+  - verify: you see a form to schedule the meeting.

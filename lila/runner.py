@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 import yaml
-from browser_use import Browser
+from browser_use import Browser, BrowserConfig
 from browser_use.browser.context import BrowserContext
 from browser_use.controller.service import Controller
 from browser_use.controller.views import (
@@ -150,9 +150,6 @@ class TestCase:
         run_id: str,
         server_url: str,
     ) -> None:
-        print("Handling step")
-        print(step_type)
-        print(step_content)
         page = await context.get_current_page()
         if step_type == "goto":
             await page.goto(step_content)
@@ -195,24 +192,17 @@ class TestCase:
                 ret.raise_for_status()
 
                 data = ret.json()["completion"]
-                print("*****************")
-                print(data)
-                print("*****************")
                 if "action" in data:
                     if data["action"] == "click":
-                        print("About to click")
                         clicker = controller.registry.registry.actions["click_element"]
-                        print(clicker)
                         await clicker.function(
                             ClickElementAction(index=int(data["element"])), context
                         )
-                        print("Clicked")
 
                     await page.wait_for_load_state()
                     prev_report = {"status": "success"}
 
                 if data["status"] == "complete":
-                    print("This is done")
                     done = True
                 elif data["status"] == "failure":
                     send_step_log(run_id, idx, "info", data["log"], server_url)
@@ -224,15 +214,14 @@ class TestCase:
                     screenshot = await context.take_screenshot()
                     send_step_log(run_id, idx, "info", data["log"], server_url)
                     send_step_screenshot(run_id, idx, screenshot, server_url)
+                    self._update_state(run_id, server_url, update_queue)
 
         # Submit a clean screenshot
         await context.remove_highlights()
         screenshot = await context.take_screenshot()
         send_step_screenshot(run_id, idx, screenshot, server_url)
-        import time
-
-        time.sleep(1)
         report_step_result(run_id, idx, "success", "Step completed", server_url)
+        self._update_state(run_id, server_url, update_queue)
 
     def start(self, server_url: str, batch_id: str) -> str:
         required_secrets = get_vars(self.raw_content)
@@ -265,7 +254,8 @@ class TestCase:
         report_test_status(run_id, {"status": "running"}, server_url)
         update_queue.put(True)
 
-        browser = Browser()
+        config = BrowserConfig(headless=config.browser.headless)
+        browser = Browser(config=config)
         async with await browser.new_context() as context:
             for idx, step in enumerate(self.steps):
                 step_type, step_content = [(k, v) for k, v in step.items()][0]
