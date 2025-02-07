@@ -143,6 +143,12 @@ def _get_config(config_file: Optional[str]) -> Config:
 @click.option(
     "--batch-id", type=str, help="Batch ID to group test runs", required=False
 )
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Disable tracking of logs and screenshots",
+    default=False,
+)
 def run(
     path: str,
     tags: str,
@@ -151,6 +157,7 @@ def run(
     browser_state: Optional[str],
     output_dir: Optional[str],
     batch_id: Optional[str],
+    dry_run: bool = False,
 ):
     """Run a Lila test suite."""
     console = Console()
@@ -230,10 +237,11 @@ def run(
         batch_id = str(uuid.uuid4())
 
     runner = TestRunner(testcases)
-    console.print(
-        f"[bold]Track your test run at: {config_obj.runtime.server_url}/runs/{batch_id}[/]"
-    )
-    success = runner.run_tests(config_obj, browser_state, batch_id)
+    if not dry_run:
+        console.print(
+            f"[bold]Track your test run at: {config_obj.runtime.server_url}/runs/{batch_id}[/]"
+        )
+    success = runner.run_tests(config_obj, browser_state, batch_id, dry_run)
     if not success:
         sys.exit(1)
 

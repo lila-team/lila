@@ -14,7 +14,9 @@ from browser_use.browser.context import BrowserContext
 from browser_use.controller.service import Controller
 from browser_use.controller.views import (
     ClickElementAction,
+    InputTextAction,
 )
+from loguru import logger
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -37,6 +39,7 @@ def report_test_status(run_id: str, payload: Dict, server_url: str) -> None:
         json=payload,
     )
     ret.raise_for_status()
+    logger.debug(f"Successfully reported test status for run {run_id}")
 
 
 def report_step_result(
@@ -52,6 +55,7 @@ def report_step_result(
         json={"result": result, "msg": msg},
     )
     ret.raise_for_status()
+    logger.debug(f"Successfully reported step result for run {run_id}")
 
 
 def send_step_screenshot(
@@ -67,6 +71,7 @@ def send_step_screenshot(
         json={"screenshot_b64": screenshot_b64},
     )
     ret.raise_for_status()
+    logger.debug(f"Successfully sent screenshot for run {run_id}")
 
 
 def send_step_log(run_id: str, idx: int, level: str, msg: str, server_url: str) -> None:
@@ -80,6 +85,7 @@ def send_step_log(run_id: str, idx: int, level: str, msg: str, server_url: str) 
         json={"level": level, "msg": msg},
     )
     ret.raise_for_status()
+    logger.debug(f"Successfully sent log for run {run_id}")
 
 
 @dataclass
@@ -111,6 +117,7 @@ class TestCase:
     @classmethod
     def from_yaml(cls, name: str, content: str):
         data = yaml.safe_load(content)
+        logger.debug(f"Loaded test case: {name}")
         return cls(
             name=name,
             steps=[step for step in data["steps"]],
@@ -130,6 +137,7 @@ class TestCase:
         )
         ret.raise_for_status()
         data = ret.json()
+        logger.debug(f"Succesfully fetched state for run {run_id}")
         self.steps_results = [
             StepResult(success=step["success"], msg=step["msg"])
             for step in data["step_results"]
@@ -139,6 +147,7 @@ class TestCase:
         ][-MAX_LOGS_DISPLAY:]
         self.status = data.get("conclusion", data["run_status"])
         update_queue.put(True)
+        logger.debug("Updated update queue for new state to render")
 
     async def handle_step(
         self,
@@ -149,13 +158,17 @@ class TestCase:
         update_queue: Queue,
         run_id: str,
         server_url: str,
+        dry_run: bool = False,
     ) -> None:
+        logger.info(f"Handling step {idx}: {step_type} {step_content}")
         page = await context.get_current_page()
         if step_type == "goto":
             await page.goto(step_content)
             await page.wait_for_load_state()
-            send_step_log(run_id, idx, "info", "Navigated to page", server_url)
-            self._update_state(run_id, server_url, update_queue)
+            logger.debug(f"Successfully navigated to {step_content}")
+            if not dry_run:
+                send_step_log(run_id, idx, "info", "Navigated to page", server_url)
+                self._update_state(run_id, server_url, update_queue)
         else:
             done = False
             prev_report = None
@@ -180,6 +193,7 @@ class TestCase:
                     json=dumped_state,
                 )
                 ret.raise_for_status()
+                logger.debug(f"Successfully sent browser state for run {run_id}")
 
                 ret = requests.get(
                     f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/completion",
@@ -190,38 +204,61 @@ class TestCase:
                     },
                 )
                 ret.raise_for_status()
+                logger.debug(f"Successfully fetched completion for run {run_id}")
 
                 data = ret.json()["completion"]
+                logger.info(f"New completion data: {data}")
                 if "action" in data:
+                    logger.debug("Completion requires action")
                     if data["action"] == "click":
-                        clicker = controller.registry.registry.actions["click_element"]
-                        await clicker.function(
+                        fn = controller.registry.registry.actions["click_element"]
+                        await fn.function(
                             ClickElementAction(index=int(data["element"])), context
+                        )
+                    elif data["action"] == "input":
+                        fn = controller.registry.registry.actions["input_text"]
+                        await fn.function(
+                            InputTextAction(
+                                index=int(data["element"]), text=data["text"]
+                            ),
+                            context,
                         )
 
                     await page.wait_for_load_state()
                     prev_report = {"status": "success"}
+                    logger.info(
+                        f"Handled action {data['action']} required by completion for step {idx}"
+                    )
 
                 if data["status"] == "complete":
                     done = True
+                    logger.info("Completion reports step is done")
                 elif data["status"] == "failure":
-                    send_step_log(run_id, idx, "info", data["log"], server_url)
+                    if not dry_run:
+                        send_step_log(run_id, idx, "info", data["log"], server_url)
+                    logger.info("Completion reports step failed")
                     raise RuntimeError(f"Failed to execute step: {data['log']}")
 
                 if not done:
                     # Submit a clean screenshot
                     await context.remove_highlights()
                     screenshot = await context.take_screenshot()
-                    send_step_log(run_id, idx, "info", data["log"], server_url)
-                    send_step_screenshot(run_id, idx, screenshot, server_url)
-                    self._update_state(run_id, server_url, update_queue)
+                    if not dry_run:
+                        send_step_log(run_id, idx, "info", data["log"], server_url)
+                        send_step_screenshot(run_id, idx, screenshot, server_url)
+                        self._update_state(run_id, server_url, update_queue)
+
+        if not dry_run:
+            report_step_result(run_id, idx, "success", "Step completed", server_url)
 
         # Submit a clean screenshot
         await context.remove_highlights()
         screenshot = await context.take_screenshot()
-        send_step_screenshot(run_id, idx, screenshot, server_url)
-        report_step_result(run_id, idx, "success", "Step completed", server_url)
-        self._update_state(run_id, server_url, update_queue)
+        if not dry_run:
+            send_step_screenshot(run_id, idx, screenshot, server_url)
+            self._update_state(run_id, server_url, update_queue)
+
+        logger.info(f"Step {idx} completed successfully")
 
     def start(self, server_url: str, batch_id: str) -> str:
         required_secrets = get_vars(self.raw_content)
@@ -245,10 +282,17 @@ class TestCase:
         if ret.status_code != 201:
             raise RuntimeError(f"Failed to start run: {ret.json()}")
 
-        return ret.json()["run_id"]
+        data = ret.json()
+        logger.info(f"Successfully started run {data['run_id']} for test {self.name}")
+        return data["run_id"]
 
     async def run(
-        self, run_id: str, update_queue: Queue, config: Config, browser_state: str
+        self,
+        run_id: str,
+        update_queue: Queue,
+        config: Config,
+        browser_state: str,
+        dry_run: bool = False,
     ) -> None:
         server_url = config.runtime.server_url
         report_test_status(run_id, {"status": "running"}, server_url)
@@ -267,12 +311,14 @@ class TestCase:
                     update_queue,
                     run_id,
                     server_url,
+                    dry_run=dry_run,
                 )
 
             report_test_status(
                 run_id, {"status": "finished", "conclusion": "success"}, server_url
             )
-            self._update_state(run_id, server_url, update_queue)
+            if not dry_run:
+                self._update_state(run_id, server_url, update_queue)
 
 
 def collect_test_cases(test_files: List[str], tags: List[str], exclude_tags: List[str]):
@@ -366,7 +412,7 @@ class TestRunner:
         return table
 
     def run_tests(
-        self, config: Config, browser_state: Optional[str], batch_id: str
+        self, config: Config, browser_state: Optional[str], batch_id: str, dry_run: bool
     ) -> bool:
         def update_display(live: Live):
             """Background thread to update the display"""
@@ -377,14 +423,49 @@ class TestRunner:
                 live.update(self.create_table())
 
         failed_tests = []
+        future_to_test = {}
+
+        if dry_run:
+            with ThreadPoolExecutor(
+                max_workers=config.runtime.concurrent_workers
+            ) as executor:
+                for idx, testcase in enumerate(self.testcases):
+                    run_id = testcase.start(config.runtime.server_url, batch_id)
+
+                    # For debuggin purposes
+                    def run_wrapper(*args, **kwargs):
+                        try:
+                            return asyncio.run(testcase.run(*args, **kwargs))
+                        except Exception:
+                            print(traceback.format_exc())
+                            raise
+
+                    # Submit all tests
+                    key = executor.submit(
+                        run_wrapper,
+                        run_id,
+                        self._update_queue,
+                        config,
+                        browser_state,
+                        dry_run=True,
+                    )
+                    future_to_test[key] = testcase
+
+                ret = True
+                for future in as_completed(future_to_test.keys()):
+                    test = future_to_test[future]
+                    print(f"Test {test.name} finished with status {test.status}")
+
+                    if test.status == "failure":
+                        ret = False
+
+            return ret
 
         # Create live display
         with Live(self.create_table(), refresh_per_second=5) as live:
             # Start display update thread
             display_thread = threading.Thread(target=update_display, args=(live,))
             display_thread.start()
-
-            future_to_test = {}
 
             # Run tests in parallel
             with ThreadPoolExecutor(
