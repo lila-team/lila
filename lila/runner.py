@@ -3,7 +3,7 @@ import os
 import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field 
+from dataclasses import dataclass, field
 from queue import Queue
 from typing import Any, Dict, List, Optional
 
@@ -11,8 +11,10 @@ import requests
 import yaml
 from browser_use import Browser
 from browser_use.browser.context import BrowserContext
-from browser_use.browser.views import BrowserState
-from browser_use.dom.service import DomService
+from browser_use.controller.service import Controller
+from browser_use.controller.views import (
+    ClickElementAction,
+)
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -20,8 +22,9 @@ from rich.table import Table
 from rich.text import Text
 
 from lila.config import Config
-from lila.const import MAX_LOGS_DISPLAY, INCLUDE_ATTRIBUTES
+from lila.const import INCLUDE_ATTRIBUTES, MAX_LOGS_DISPLAY
 from lila.utils import get_vars, get_vars_from_env
+
 
 def report_test_status(run_id: str, payload: Dict, server_url: str) -> None:
     ret = requests.patch(
@@ -47,21 +50,6 @@ def report_step_result(
             "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
         },
         json={"result": result, "msg": msg},
-    )
-    ret.raise_for_status()
-
-
-def report_step_action_result(
-    run_id: str, idx: int, action_id: str, success: bool, server_url: str
-) -> None:
-    ret = requests.patch(
-        f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/actions/{action_id}",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
-        },
-        json={"success": success},
     )
     ret.raise_for_status()
 
@@ -94,37 +82,13 @@ def send_step_log(run_id: str, idx: int, level: str, msg: str, server_url: str) 
     ret.raise_for_status()
 
 
-async def get_browser_state(
-    context: BrowserContext, focus_element: int = -1
-) -> BrowserState:
-    page = await context.get_current_page()
-    await context.remove_highlights()
-    dom_service = DomService(page)
-    content = await dom_service.get_clickable_elements(
-        focus_element=focus_element,
-        # viewport_expansion=self.config.viewport_expansion,
-        # highlight_elements=self.config.highlight_elements,
-    )
-
-    screenshot_b64 = await context.take_screenshot()
-    pixels_above, pixels_below = await context.get_scroll_info(page)
-
-    return BrowserState(
-        element_tree=content.element_tree,
-        selector_map=content.selector_map,
-        url=page.url,
-        title=await page.title(),
-        tabs=await context.get_tabs_info(),
-        screenshot=screenshot_b64,
-        pixels_above=pixels_above,
-        pixels_below=pixels_below,
-    )
-
-
 @dataclass
 class StepResult:
     success: bool
     msg: str
+
+
+controller = Controller()
 
 
 @dataclass
@@ -186,50 +150,88 @@ class TestCase:
         run_id: str,
         server_url: str,
     ) -> None:
+        print("Handling step")
+        print(step_type)
+        print(step_content)
+        page = await context.get_current_page()
         if step_type == "goto":
-            page = await context.get_current_page()
             await page.goto(step_content)
             await page.wait_for_load_state()
             send_step_log(run_id, idx, "info", "Navigated to page", server_url)
             self._update_state(run_id, server_url, update_queue)
         else:
             done = False
+            prev_report = None
             while not done:
-                state = await get_browser_state(context)
+                state = await context.get_state()
                 dumped_state = {
-                    "dom": state.element_tree.clickable_elements_to_string(include_attributes=INCLUDE_ATTRIBUTES),
+                    "dom": state.element_tree.clickable_elements_to_string(
+                        include_attributes=INCLUDE_ATTRIBUTES
+                    ),
                     "screenshot_b64": state.screenshot,
                 }
+                if prev_report:
+                    dumped_state["prev_report"] = prev_report
+
                 ret = requests.post(
-                    f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/actions",
+                    f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/states",
                     headers={
                         "Content-Type": "application/json",
                         "Accept": "application/json",
                         "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
                     },
                     json=dumped_state,
-                    timeout=60,  # TODO: make this configurable
                 )
                 ret.raise_for_status()
-                data = ret.json()
-                print("********************")
-                print(data)
-                print("********************")
-                if data["status"] == "done":
-                    done = True
-                elif data["status"] == "requested_action":
-                    action_id = data["id"]
-                    action = data["action"]
-                    element = data["element"]
-                    controller.handle_action(action, element)
-                    send_step_screenshot(
-                        run_id, idx, await context.take_screenshot(), server_url
-                    )
-                    report_step_action_result(
-                        run_id, idx, action_id, success=True, server_url=server_url
-                    )
 
-        send_step_screenshot(run_id, idx, await context.take_screenshot(), server_url)
+                ret = requests.get(
+                    f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/completion",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
+                    },
+                )
+                ret.raise_for_status()
+
+                data = ret.json()["completion"]
+                print("*****************")
+                print(data)
+                print("*****************")
+                if "action" in data:
+                    if data["action"] == "click":
+                        print("About to click")
+                        clicker = controller.registry.registry.actions["click_element"]
+                        print(clicker)
+                        await clicker.function(
+                            ClickElementAction(index=int(data["element"])), context
+                        )
+                        print("Clicked")
+
+                    await page.wait_for_load_state()
+                    prev_report = {"status": "success"}
+
+                if data["status"] == "complete":
+                    print("This is done")
+                    done = True
+                elif data["status"] == "failure":
+                    send_step_log(run_id, idx, "info", data["log"], server_url)
+                    raise RuntimeError(f"Failed to execute step: {data['log']}")
+
+                if not done:
+                    # Submit a clean screenshot
+                    await context.remove_highlights()
+                    screenshot = await context.take_screenshot()
+                    send_step_log(run_id, idx, "info", data["log"], server_url)
+                    send_step_screenshot(run_id, idx, screenshot, server_url)
+
+        # Submit a clean screenshot
+        await context.remove_highlights()
+        screenshot = await context.take_screenshot()
+        send_step_screenshot(run_id, idx, screenshot, server_url)
+        import time
+
+        time.sleep(1)
         report_step_result(run_id, idx, "success", "Step completed", server_url)
 
     def start(self, server_url: str, batch_id: str) -> str:
