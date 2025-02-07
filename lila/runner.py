@@ -1,19 +1,18 @@
-import base64
+import asyncio
 import os
-import tempfile
 import threading
-import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass, field 
 from queue import Queue
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional
 
 import requests
 import yaml
-from PIL import Image
-from playwright.sync_api import Page, Playwright, sync_playwright
+from browser_use import Browser
+from browser_use.browser.context import BrowserContext
+from browser_use.browser.views import BrowserState
+from browser_use.dom.service import DomService
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -21,169 +20,105 @@ from rich.table import Table
 from rich.text import Text
 
 from lila.config import Config
-from lila.const import HEIGHT, MAX_LOGS_DISPLAY, WIDTH
-from lila.utils import Pointer, get_vars, get_vars_from_env
+from lila.const import MAX_LOGS_DISPLAY, INCLUDE_ATTRIBUTES
+from lila.utils import get_vars, get_vars_from_env
 
-
-def initialize_page(
-    p: Playwright, config: Config, browser_state: Optional[str]
-) -> Page:
-    if config.browser.type == "firefox":
-        browser = p.firefox.launch(
-            headless=config.browser.headless,
-        )
-    elif config.browser.type == "webkit":
-        browser = p.webkit.launch(
-            headless=config.browser.headless,
-        )
-    elif config.browser.type == "chromium":
-        browser = p.chromium.launch(
-            headless=config.browser.headless,
-        )
-    else:
-        raise RuntimeError(f"Unsupported browser type: {config.browser.type}")
-
-    if browser_state:
-        context = browser.new_context(storage_state=browser_state)
-    else:
-        context = browser.new_context()
-
-    page = context.new_page()
-    page.set_viewport_size(
-        {"width": config.browser.width, "height": config.browser.height}
-    )
-    return page
-
-
-@dataclass
-class ActionResult:
-    # base64 encoded screenshot
-    screenshot: str
-
-    success: bool
-    msg: Optional[str] = None
-
-
-class Resolution(TypedDict):
-    width: int
-    height: int
-
-
-# sizes above XGA/WXGA are not recommended (see README.md)
-# scale down to one of these targets if ComputerTool._scaling_enabled is set
-MAX_SCALING_TARGETS: Dict[str, Resolution] = {
-    "XGA": Resolution(width=1024, height=768),  # 4:3
-    "WXGA": Resolution(width=1280, height=800),  # 16:10
-    "FWXGA": Resolution(width=1366, height=768),  # ~16:9
-}
-
-
-def scale_coordinates(x: int, y: int):
-    """Scale coordinates to a target maximum resolution."""
-    ratio = WIDTH / HEIGHT
-    target_dimension = None
-    for dimension in MAX_SCALING_TARGETS.values():
-        # allow some error in the aspect ratio - not ratios are exactly 16:9
-        if abs(dimension["width"] / dimension["height"] - ratio) < 0.02:
-            if dimension["width"] < WIDTH:
-                target_dimension = dimension
-            break
-    if target_dimension is None:
-        return x, y
-    # should be less than 1
-    x_scaling_factor = target_dimension["width"] / WIDTH
-    y_scaling_factor = target_dimension["height"] / HEIGHT
-    return round(x * x_scaling_factor), round(y * y_scaling_factor)
-
-
-def base64_screenshot(page: Page, pointer: Pointer, wait: float = 0) -> str:
-    if wait:
-        time.sleep(wait)
-
-    with tempfile.TemporaryDirectory() as tmpdirname:
-        path = f"{tmpdirname}/screenshot.png"
-        page.screenshot(path=path)
-
-        img = Image.open(path)
-
-        # get path of current file, go back to root
-        # and appens assets/pointer.png
-        image_path = Path(__file__).parent / "assets" / "pointer.png"
-        pointer_img = Image.open(image_path)
-        img.paste(pointer_img, (pointer.x, pointer.y), pointer_img)
-        img.save(path)
-
-        x, y = scale_coordinates(WIDTH, HEIGHT)
-        img = Image.open(path)
-        img = img.resize((x, y))
-        img.save(path)
-
-        with open(path, "rb") as f:
-            return base64.b64encode(f.read()).decode("utf-8")
-
-
-def handle_action(page: Page, payload: Dict, pointer: Pointer) -> ActionResult:
-    action = payload["action"]
-    wait: float = 1
-    if action == "goto":
-        page.goto(payload["url"])
-        wait = 3
-    elif action == "screenshot":
-        wait = 0
-    elif action == "left_click":
-        page.mouse.down()
-        page.mouse.up()
-    elif action == "right_click":
-        page.mouse.down(button="right")
-        page.mouse.up(button="right")
-    elif action == "double_click":
-        page.mouse.down()
-        page.mouse.up()
-        page.mouse.down()
-        page.mouse.up()
-    elif action == "mouse_move":
-        page.mouse.move(payload["x"], payload["y"])
-        pointer.x = payload["x"]
-        pointer.y = payload["y"]
-    elif action == "left_click_drag":
-        page.mouse.down(button="left")
-        page.mouse.move(payload["x"], payload["y"])
-        page.mouse.up(button="left")
-        pointer.x = payload["x"]
-        pointer.y = payload["y"]
-    elif action == "key":
-        text_mapping = {
-            "Return": "Enter",
-        }
-        page.keyboard.press(text_mapping.get(payload["text"], payload["text"]))
-        wait = 0.5
-    elif action == "type":
-        page.keyboard.type(payload["text"], delay=100)
-        wait = 0.5
-    else:
-        raise RuntimeError(f"Unknown action: {action}")
-
-    return ActionResult(
-        success=True, screenshot=base64_screenshot(page, pointer, wait=wait)
-    )
-
-
-def report_action_result(
-    run_id: str, action_id: str, result: ActionResult, server_url: str
-) -> None:
+def report_test_status(run_id: str, payload: Dict, server_url: str) -> None:
     ret = requests.patch(
-        f"{server_url}/api/v1/remote/runs/{run_id}/actions/{action_id}",
+        f"{server_url}/api/v1/remote/runs/{run_id}",
         headers={
             "Content-Type": "application/json",
             "Accept": "application/json",
             "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
         },
-        json={
-            "result": "success" if result.success else "error",
-            "screenshot": result.screenshot,
-        },
+        json=payload,
     )
     ret.raise_for_status()
+
+
+def report_step_result(
+    run_id: str, idx: int, result: str, msg: str, server_url: str
+) -> None:
+    ret = requests.put(
+        f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/result",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
+        },
+        json={"result": result, "msg": msg},
+    )
+    ret.raise_for_status()
+
+
+def report_step_action_result(
+    run_id: str, idx: int, action_id: str, success: bool, server_url: str
+) -> None:
+    ret = requests.patch(
+        f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/actions/{action_id}",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
+        },
+        json={"success": success},
+    )
+    ret.raise_for_status()
+
+
+def send_step_screenshot(
+    run_id: str, idx: int, screenshot_b64: str, server_url: str
+) -> None:
+    ret = requests.post(
+        f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/screenshots",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
+        },
+        json={"screenshot_b64": screenshot_b64},
+    )
+    ret.raise_for_status()
+
+
+def send_step_log(run_id: str, idx: int, level: str, msg: str, server_url: str) -> None:
+    ret = requests.post(
+        f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/logs",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
+        },
+        json={"level": level, "msg": msg},
+    )
+    ret.raise_for_status()
+
+
+async def get_browser_state(
+    context: BrowserContext, focus_element: int = -1
+) -> BrowserState:
+    page = await context.get_current_page()
+    await context.remove_highlights()
+    dom_service = DomService(page)
+    content = await dom_service.get_clickable_elements(
+        focus_element=focus_element,
+        # viewport_expansion=self.config.viewport_expansion,
+        # highlight_elements=self.config.highlight_elements,
+    )
+
+    screenshot_b64 = await context.take_screenshot()
+    pixels_above, pixels_below = await context.get_scroll_info(page)
+
+    return BrowserState(
+        element_tree=content.element_tree,
+        selector_map=content.selector_map,
+        url=page.url,
+        title=await page.title(),
+        tabs=await context.get_tabs_info(),
+        screenshot=screenshot_b64,
+        pixels_above=pixels_above,
+        pixels_below=pixels_below,
+    )
 
 
 @dataclass
@@ -220,55 +155,82 @@ class TestCase:
             raw_content=content,
         )
 
-    def loop_until_done(
-        self, page: Page, run_id: str, update_queue: Queue, server_url: str
+    def _update_state(self, run_id: str, server_url: str, update_queue: Queue):
+        ret = requests.get(
+            f"{server_url}/api/v1/remote/runs/{run_id}/status",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
+            },
+        )
+        ret.raise_for_status()
+        data = ret.json()
+        self.steps_results = [
+            StepResult(success=step["success"], msg=step["msg"])
+            for step in data["step_results"]
+        ]
+        self.logs = [
+            {"level": log["level"], "msg": log["msg"]} for log in data["logs"]
+        ][-MAX_LOGS_DISPLAY:]
+        self.status = data.get("conclusion", data["run_status"])
+        update_queue.put(True)
+
+    async def handle_step(
+        self,
+        idx: int,
+        step_type: str,
+        step_content: str,
+        context: BrowserContext,
+        update_queue: Queue,
+        run_id: str,
+        server_url: str,
     ) -> None:
-        done = False
-        pointer = Pointer(WIDTH // 2, HEIGHT // 2)
-        while not done and not self._should_stop:
-            ret = requests.get(
-                f"{server_url}/api/v1/remote/runs/{run_id}/status",
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
-                },
-            )
-            ret.raise_for_status()
-            data = ret.json()
-            self.steps_results = [
-                StepResult(success=step["success"], msg=step["msg"])
-                for step in data["step_results"]
-            ]
-            self.logs = [
-                {"level": log["level"], "msg": log["msg"]} for log in data["logs"]
-            ][-MAX_LOGS_DISPLAY:]
+        if step_type == "goto":
+            page = await context.get_current_page()
+            await page.goto(step_content)
+            await page.wait_for_load_state()
+            send_step_log(run_id, idx, "info", "Navigated to page", server_url)
+            self._update_state(run_id, server_url, update_queue)
+        else:
+            done = False
+            while not done:
+                state = await get_browser_state(context)
+                dumped_state = {
+                    "dom": state.element_tree.clickable_elements_to_string(include_attributes=INCLUDE_ATTRIBUTES),
+                    "screenshot_b64": state.screenshot,
+                }
+                ret = requests.post(
+                    f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/actions",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
+                    },
+                    json=dumped_state,
+                    timeout=60,  # TODO: make this configurable
+                )
+                ret.raise_for_status()
+                data = ret.json()
+                print("********************")
+                print(data)
+                print("********************")
+                if data["status"] == "done":
+                    done = True
+                elif data["status"] == "requested_action":
+                    action_id = data["id"]
+                    action = data["action"]
+                    element = data["element"]
+                    controller.handle_action(action, element)
+                    send_step_screenshot(
+                        run_id, idx, await context.take_screenshot(), server_url
+                    )
+                    report_step_action_result(
+                        run_id, idx, action_id, success=True, server_url=server_url
+                    )
 
-            update_queue.put(True)
-
-            if data["run_status"] in [
-                "finished",
-                "cancelled",
-                "error",
-                "remote_timeout",
-            ]:
-                done = True
-                self.status = data.get("conclusion") or data["run_status"]
-                self.duration = data["duration"]
-            elif data["run_status"] == "processing":
-                self.status = "running"
-                time.sleep(0.5)
-            elif data["run_status"] == "requested_action":
-                payload = data["payload"]
-                result = handle_action(page, payload, pointer)
-                report_action_result(run_id, data["id"], result, server_url)
-            else:
-                raise RuntimeError(f"Unknown status: {data['status']}")
-
-        if self._should_stop:
-            self.status = "cancelled"
-            update_queue.put(True)
-            return
+        send_step_screenshot(run_id, idx, await context.take_screenshot(), server_url)
+        report_step_result(run_id, idx, "success", "Step completed", server_url)
 
     def start(self, server_url: str, batch_id: str) -> str:
         required_secrets = get_vars(self.raw_content)
@@ -294,21 +256,31 @@ class TestCase:
 
         return ret.json()["run_id"]
 
-    def run(
-        self, run_id, update_queue: Queue, config: Config, browser_state: str
+    async def run(
+        self, run_id: str, update_queue: Queue, config: Config, browser_state: str
     ) -> None:
-        with sync_playwright() as p:
-            page = initialize_page(p, config, browser_state)
-            self.status = "pending"
-            update_queue.put(True)
-            self.loop_until_done(page, run_id, update_queue, config.runtime.server_url)
-            update_queue.put(True)
+        server_url = config.runtime.server_url
+        report_test_status(run_id, {"status": "running"}, server_url)
+        update_queue.put(True)
 
-            # Save state of the page
-            output_file = f"{config.runtime.output_dir}/{self.name}.json"
-            os.makedirs(os.path.dirname(output_file), exist_ok=True)
-            page.context.storage_state(path=output_file)
-            page.close()
+        browser = Browser()
+        async with await browser.new_context() as context:
+            for idx, step in enumerate(self.steps):
+                step_type, step_content = [(k, v) for k, v in step.items()][0]
+                await self.handle_step(
+                    idx,
+                    step_type,
+                    step_content,
+                    context,
+                    update_queue,
+                    run_id,
+                    server_url,
+                )
+
+            report_test_status(
+                run_id, {"status": "finished", "conclusion": "success"}, server_url
+            )
+            self._update_state(run_id, server_url, update_queue)
 
 
 def collect_test_cases(test_files: List[str], tags: List[str], exclude_tags: List[str]):
@@ -432,7 +404,7 @@ class TestRunner:
                     # For debuggin purposes
                     def run_wrapper(*args, **kwargs):
                         try:
-                            return testcase.run(*args, **kwargs)
+                            return asyncio.run(testcase.run(*args, **kwargs))
                         except Exception:
                             print(traceback.format_exc())
                             raise
@@ -502,15 +474,3 @@ class TestRunner:
             )
 
         return failed == 0
-
-        # slowest_test = sorted(self.testcases, key=lambda t: t.duration, reverse=True)[0]
-        # fastest_test = sorted(self.testcases, key=lambda t: t.duration)[0]
-        # avg = sum(t.duration for t in self.testcases) / total
-
-        # self.console.print(
-        #     f"Slowest test: {slowest_test.name} [white]({slowest_test.duration:.2f}s)[/]"
-        # )
-        # self.console.print(
-        #     f"Fastest test: {fastest_test.name} [white]({fastest_test.duration:.2f}s)[/]"
-        # )
-        # self.console.print(f"Average duration: [white]{avg:.2f}s[/]")
