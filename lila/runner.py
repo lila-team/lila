@@ -1,195 +1,116 @@
-import base64
+import asyncio
+import json
 import os
 import tempfile
-import threading
-import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from queue import Queue
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional
 
 import requests
 import yaml
-from PIL import Image
-from playwright.sync_api import Page, Playwright, sync_playwright
-from rich.console import Console
-from rich.live import Live
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
+from browser_use import Browser, BrowserConfig
+from browser_use.browser.context import BrowserContext, BrowserContextConfig
+from browser_use.controller.service import Controller
+from browser_use.controller.views import (
+    ClickElementAction,
+    InputTextAction,
+    ScrollAction,
+)
+from loguru import logger
 
 from lila.config import Config
-from lila.const import HEIGHT, MAX_LOGS_DISPLAY, WIDTH
-from lila.utils import Pointer, get_vars, get_vars_from_env
-
-
-def initialize_page(
-    p: Playwright, config: Config, browser_state: Optional[str]
-) -> Page:
-    if config.browser.type == "firefox":
-        browser = p.firefox.launch(
-            headless=config.browser.headless,
-        )
-    elif config.browser.type == "webkit":
-        browser = p.webkit.launch(
-            headless=config.browser.headless,
-        )
-    elif config.browser.type == "chromium":
-        browser = p.chromium.launch(
-            headless=config.browser.headless,
-        )
-    else:
-        raise RuntimeError(f"Unsupported browser type: {config.browser.type}")
-
-    if browser_state:
-        context = browser.new_context(storage_state=browser_state)
-    else:
-        context = browser.new_context()
-
-    page = context.new_page()
-    page.set_viewport_size(
-        {"width": config.browser.width, "height": config.browser.height}
-    )
-    return page
+from lila.const import MAX_ATTEMPTS, MAX_LOGS_DISPLAY
+from lila.utils import (
+    PressKeyWithFocus,
+    dump_browser_state,
+    get_completion,
+    press_key,
+    pretty_step_formatter,
+    render_template_to_file,
+    send_state,
+)
 
 
 @dataclass
-class ActionResult:
-    # base64 encoded screenshot
-    screenshot: str
-
-    success: bool
-    msg: Optional[str] = None
+class ReportLog:
+    log: str
+    screenshot_b64: str
 
 
-class Resolution(TypedDict):
-    width: int
-    height: int
+class FailedStepError(RuntimeError):
+    pass
 
 
-# sizes above XGA/WXGA are not recommended (see README.md)
-# scale down to one of these targets if ComputerTool._scaling_enabled is set
-MAX_SCALING_TARGETS: Dict[str, Resolution] = {
-    "XGA": Resolution(width=1024, height=768),  # 4:3
-    "WXGA": Resolution(width=1280, height=800),  # 16:10
-    "FWXGA": Resolution(width=1366, height=768),  # ~16:9
-}
-
-
-def scale_coordinates(x: int, y: int):
-    """Scale coordinates to a target maximum resolution."""
-    ratio = WIDTH / HEIGHT
-    target_dimension = None
-    for dimension in MAX_SCALING_TARGETS.values():
-        # allow some error in the aspect ratio - not ratios are exactly 16:9
-        if abs(dimension["width"] / dimension["height"] - ratio) < 0.02:
-            if dimension["width"] < WIDTH:
-                target_dimension = dimension
-            break
-    if target_dimension is None:
-        return x, y
-    # should be less than 1
-    x_scaling_factor = target_dimension["width"] / WIDTH
-    y_scaling_factor = target_dimension["height"] / HEIGHT
-    return round(x * x_scaling_factor), round(y * y_scaling_factor)
-
-
-def base64_screenshot(page: Page, pointer: Pointer, wait: float = 0) -> str:
-    if wait:
-        time.sleep(wait)
-
-    with tempfile.TemporaryDirectory() as tmpdirname:
-        path = f"{tmpdirname}/screenshot.png"
-        page.screenshot(path=path)
-
-        img = Image.open(path)
-
-        # get path of current file, go back to root
-        # and appens assets/pointer.png
-        image_path = Path(__file__).parent / "assets" / "pointer.png"
-        pointer_img = Image.open(image_path)
-        img.paste(pointer_img, (pointer.x, pointer.y), pointer_img)
-        img.save(path)
-
-        x, y = scale_coordinates(WIDTH, HEIGHT)
-        img = Image.open(path)
-        img = img.resize((x, y))
-        img.save(path)
-
-        with open(path, "rb") as f:
-            return base64.b64encode(f.read()).decode("utf-8")
-
-
-def handle_action(page: Page, payload: Dict, pointer: Pointer) -> ActionResult:
-    action = payload["action"]
-    wait: float = 1
-    if action == "goto":
-        page.goto(payload["url"])
-        wait = 3
-    elif action == "screenshot":
-        wait = 0
-    elif action == "left_click":
-        page.mouse.down()
-        page.mouse.up()
-    elif action == "right_click":
-        page.mouse.down(button="right")
-        page.mouse.up(button="right")
-    elif action == "double_click":
-        page.mouse.down()
-        page.mouse.up()
-        page.mouse.down()
-        page.mouse.up()
-    elif action == "mouse_move":
-        page.mouse.move(payload["x"], payload["y"])
-        pointer.x = payload["x"]
-        pointer.y = payload["y"]
-    elif action == "left_click_drag":
-        page.mouse.down(button="left")
-        page.mouse.move(payload["x"], payload["y"])
-        page.mouse.up(button="left")
-        pointer.x = payload["x"]
-        pointer.y = payload["y"]
-    elif action == "key":
-        text_mapping = {
-            "Return": "Enter",
-        }
-        page.keyboard.press(text_mapping.get(payload["text"], payload["text"]))
-        wait = 0.5
-    elif action == "type":
-        page.keyboard.type(payload["text"], delay=100)
-        wait = 0.5
-    else:
-        raise RuntimeError(f"Unknown action: {action}")
-
-    return ActionResult(
-        success=True, screenshot=base64_screenshot(page, pointer, wait=wait)
-    )
-
-
-def report_action_result(
-    run_id: str, action_id: str, result: ActionResult, server_url: str
-) -> None:
+def report_test_status(run_id: str, payload: Dict, server_url: str) -> None:
     ret = requests.patch(
-        f"{server_url}/api/v1/remote/runs/{run_id}/actions/{action_id}",
+        f"{server_url}/api/v1/remote/runs/{run_id}",
         headers={
             "Content-Type": "application/json",
             "Accept": "application/json",
             "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
         },
-        json={
-            "result": "success" if result.success else "error",
-            "screenshot": result.screenshot,
-        },
+        json=payload,
     )
     ret.raise_for_status()
+    logger.debug(f"Successfully reported test status for run {run_id}")
+
+
+def report_step_result(
+    run_id: str, idx: int, result: str, msg: str, server_url: str
+) -> None:
+    ret = requests.put(
+        f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/result",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
+        },
+        json={"result": result, "msg": msg},
+    )
+    ret.raise_for_status()
+    logger.debug(f"Successfully reported step result for run {run_id}")
+
+
+def send_step_screenshot(
+    run_id: str, idx: int, screenshot_b64: str, server_url: str
+) -> None:
+    ret = requests.post(
+        f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/screenshots",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
+        },
+        json={"screenshot_b64": screenshot_b64},
+    )
+    ret.raise_for_status()
+    logger.debug(f"Successfully sent screenshot for run {run_id}")
+
+
+def send_step_log(run_id: str, idx: int, level: str, msg: str, server_url: str) -> None:
+    ret = requests.post(
+        f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/logs",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
+        },
+        json={"level": level, "msg": msg},
+    )
+    ret.raise_for_status()
+    logger.debug(f"Successfully sent log for run {run_id}")
 
 
 @dataclass
 class StepResult:
     success: bool
     msg: str
+
+
+controller = Controller()
 
 
 @dataclass
@@ -212,6 +133,7 @@ class TestCase:
     @classmethod
     def from_yaml(cls, name: str, content: str):
         data = yaml.safe_load(content)
+        logger.debug(f"Loaded test case: {name}")
         return cls(
             name=name,
             steps=[step for step in data["steps"]],
@@ -220,60 +142,336 @@ class TestCase:
             raw_content=content,
         )
 
-    def loop_until_done(
-        self, page: Page, run_id: str, update_queue: Queue, server_url: str
+    def dump_report(self, output_dir: str, report: Dict[int, List[ReportLog]]) -> None:
+        # Writes a markdown report for the test case
+        template_data = {
+            "name": self.name,
+            "steps": self.steps,
+            "report": report,
+            "now": datetime.utcnow(),
+        }
+        template_path = Path(__file__).parent / "assets" / "report.html"
+        output = Path(output_dir) / f"{self.name}.html"
+        render_template_to_file(template_path, output, template_data)
+        logger.debug(f"Report for {self.name} saved at {output}")
+
+    def _update_state(self, run_id: str, server_url: str):
+        ret = requests.get(
+            f"{server_url}/api/v1/remote/runs/{run_id}/status",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
+            },
+        )
+        ret.raise_for_status()
+        data = ret.json()
+        logger.debug(f"Succesfully fetched state for run {run_id}")
+        self.steps_results = [
+            StepResult(success=step["success"], msg=step["msg"])
+            for step in data["step_results"]
+        ]
+        self.logs = [
+            {"level": log["level"], "msg": log["msg"]} for log in data["logs"]
+        ][-MAX_LOGS_DISPLAY:]
+        self.status = data.get("conclusion", data["run_status"])
+        logger.debug("Updated update queue for new state to render")
+
+    async def handle_verifications(
+        self,
+        idx: int,
+        step_content: str,
+        context: BrowserContext,
+        run_id: str,
+        server_url: str,
+        report_logs: List[ReportLog],
+        dry_run: bool = False,
     ) -> None:
-        done = False
-        pointer = Pointer(WIDTH // 2, HEIGHT // 2)
-        while not done and not self._should_stop:
-            ret = requests.get(
-                f"{server_url}/api/v1/remote/runs/{run_id}/status",
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
-                },
-            )
-            ret.raise_for_status()
-            data = ret.json()
-            self.steps_results = [
-                StepResult(success=step["success"], msg=step["msg"])
-                for step in data["step_results"]
-            ]
-            self.logs = [
-                {"level": log["level"], "msg": log["msg"]} for log in data["logs"]
-            ][-MAX_LOGS_DISPLAY:]
+        state = await context.get_state()
+        dumped_state = dump_browser_state(state)
+        ret = requests.post(
+            f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/verifications",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
+            },
+            json=dumped_state,
+        )
+        ret.raise_for_status()
+        logger.debug(
+            f"Successfully sent browser state for verification for step {idx } run {run_id}"
+        )
 
-            update_queue.put(True)
+        data = ret.json()
 
-            if data["run_status"] in [
-                "finished",
-                "cancelled",
-                "error",
-                "remote_timeout",
-            ]:
-                done = True
-                self.status = data.get("conclusion") or data["run_status"]
-                self.duration = data["duration"]
-            elif data["run_status"] == "processing":
-                self.status = "running"
-                time.sleep(0.5)
-            elif data["run_status"] == "requested_action":
-                payload = data["payload"]
-                result = handle_action(page, payload, pointer)
-                report_action_result(run_id, data["id"], result, server_url)
-            else:
-                raise RuntimeError(f"Unknown status: {data['status']}")
-
-        if self._should_stop:
-            self.status = "cancelled"
-            update_queue.put(True)
+        if not data["verifications"]:
+            logger.debug(f"No verifications found for step {idx}")
             return
 
-    def start(self, server_url: str, batch_id: str) -> str:
-        required_secrets = get_vars(self.raw_content)
-        given_secrets = get_vars_from_env(required_secrets, fail_if_missing=False)
+        for verification in data["verifications"]:
+            if verification["status"] == "failure":
+                logger.debug(
+                    f"Verification failed for step {pretty_step_formatter(self.steps[idx])}: {verification['log']}"
+                )
+                report_logs.append(
+                    ReportLog(
+                        log=f"Verification failed: {verification['log']}",
+                        screenshot_b64=await context.take_screenshot(),
+                    )
+                )
+                raise FailedStepError(f"Failed to execute step: {verification['log']}")
 
+            logger.debug(f"Verification passed for step {idx}: {verification['log']}")
+            report_logs.append(
+                ReportLog(
+                    log=f"Verification passed: {verification['log']}",
+                    screenshot_b64=await context.take_screenshot(),
+                )
+            )
+
+    async def _handle_complex_step(
+        self,
+        idx: int,
+        context: BrowserContext,
+        run_id: str,
+        server_url: str,
+        report_logs: List[ReportLog],
+        dry_run: bool = False,
+    ) -> None:
+        done = False
+        prev_interaction = None
+        scrolling = False
+        attempts = 0
+        while not done:
+            action_result = None
+            attempts += 1
+            if attempts > MAX_ATTEMPTS:
+                raise FailedStepError("Step took too long to complete")
+
+            state = await context.get_state()
+            send_state(idx, run_id, server_url, state, prev_interaction)
+            logger.debug(f"Sent state for step {idx}")
+
+            data = get_completion(idx, run_id, server_url)["completion"]
+
+            report_logs.append(
+                ReportLog(
+                    log=data["log"],
+                    screenshot_b64=await context.take_screenshot(),
+                )
+            )
+
+            logger.debug(f"Got completion data for step {idx}")
+
+            logger.info(data["log"])
+            if "action" in data:
+                logger.debug(f"Completion requires action: {data['action']}")
+                if data["action"] == "click":
+                    fn = controller.registry.registry.actions["click_element"]
+                    action_result = await fn.function(
+                        ClickElementAction(index=int(data["element"])), context
+                    )
+                    # Hack. There is a bug in browser use that reports a click
+                    # as a failure when the context is destroyed due to a navigation
+                    # event. This is a workaround to handle that.
+                    if (
+                        action_result.error
+                        and "Execution context was destroyed" in action_result.error
+                    ):
+                        action_result.error = None
+
+                    if action_result.error:
+                        logger.error(f"Click failed: {action_result.error}")
+                    else:
+                        logger.info("Click performed successfully")
+
+                    prev_interaction = {
+                        "status": "failure" if action_result.error else "success",
+                        "msg": action_result.error
+                        or "Successfully clicked requested element",
+                    }
+                elif data["action"] == "input":
+                    fn = controller.registry.registry.actions["input_text"]
+                    action_result = await fn.function(
+                        InputTextAction(index=int(data["element"]), text=data["text"]),
+                        context,
+                    )
+
+                    if action_result.error:
+                        logger.error(f"Input failed: {action_result.error}")
+                    else:
+                        logger.info("Input performed successfully")
+
+                    prev_interaction = {
+                        "status": "failure" if action_result.error else "success",
+                        "msg": action_result.error
+                        or "Successfully inputted text into requested element",
+                    }
+                elif data["action"] == "press-enter":
+                    action_result = await press_key(
+                        PressKeyWithFocus(index=int(data["element"]), key="Enter"),
+                        context,
+                    )
+                    logger.debug("Pressed Enter key")
+                    if action_result.error:
+                        logger.error(f"Press Enter failed: {action_result.error}")
+                    else:
+                        logger.info("Press Enter performed successfully")
+
+                    prev_interaction = {
+                        "status": "failure" if action_result.error else "success",
+                        "msg": action_result.error or "Successfully pressed Enter key",
+                    }
+                elif data["action"] == "native-dropdown-open":
+                    fn = controller.registry.registry.actions["get_dropdown_options"]
+                    action_result = await fn.function(
+                        index=int(data["element"]),
+                        browser=context,
+                    )
+
+                    if action_result.error:
+                        logger.error(f"Failed to open dropdown: {action_result.error}")
+                    else:
+                        logger.info("Opened dropdown and got options")
+                    prev_interaction = {
+                        "status": "failure" if action_result.error else "success",
+                        "msg": action_result.error
+                        or f"Successfully opened dropdown and got options:\n{action_result.extracted_content}",
+                    }
+                    logger.debug("Opened dropdown and got options")
+                elif data["action"] == "native-dropdown-select":
+                    fn = controller.registry.registry.actions["select_dropdown_option"]
+                    action_result = await fn.function(
+                        index=int(data["element"]),
+                        text=data["text"],
+                        browser=context,
+                    )
+
+                    if action_result.error:
+                        logger.error(
+                            f"Failed to select option from dropdown: {action_result.error}"
+                        )
+                    else:
+                        logger.info("Selected option from dropdown")
+
+                    prev_interaction = {
+                        "status": "failure" if action_result.error else "success",
+                        "msg": action_result.error
+                        or "Successfully selected option from dropdown",
+                    }
+                    logger.debug("Opened dropdown and got options")
+                else:
+                    raise RuntimeError(f"Unknown action {data['action']}")
+
+                await context._wait_for_page_and_frames_load()
+                report_logs.append(
+                    ReportLog(
+                        log=action_result.error or "Action performed successfully",
+                        screenshot_b64=await context.take_screenshot(),
+                    )
+                )
+
+            if data["status"] == "complete" and (
+                action_result is None or not action_result.error
+            ):
+                done = True
+                logger.debug("Completion reports step completed.")
+                report_logs.append(
+                    ReportLog(
+                        log="Step completed successfully",
+                        screenshot_b64=await context.take_screenshot(),
+                    )
+                )
+            if data["status"] == "wip":
+                logger.debug("Completion reports step still in progress.")
+            elif data["status"] == "not-found":
+                logger.debug("Completion reports element not found. Running scrolling.")
+                if scrolling or state.pixels_above == 0:
+                    if state.pixels_below == 0:
+                        logger.debug("No more elements to uncover. Failing step.")
+                        raise FailedStepError(f"Failed to execute step: {data['log']}")
+
+                    fn = controller.registry.registry.actions["scroll_down"]
+                    await fn.function(ScrollAction(), context)
+                    logger.debug("Scrolled one page down")
+                    prev_interaction = {
+                        "status": "success",
+                        "msg": "Scrolled down one page to uncover more elements.",
+                    }
+                    report_logs.append(
+                        ReportLog(
+                            log="Scrolled down one page to uncover more elements.",
+                            screenshot_b64=await context.take_screenshot(),
+                        )
+                    )
+                else:
+                    fn = controller.registry.registry.actions["scroll_up"]
+                    await fn.function(ScrollAction(state.pixels_above), context)
+                    logger.debug("Moved all the way up")
+                    prev_interaction = {
+                        "status": "success",
+                        "msg": "Scrolled to the top of the page to uncover more elements.",
+                    }
+                    report_logs.append(
+                        ReportLog(
+                            log="Scrolled to the top of the page to uncover more elements.",
+                            screenshot_b64=await context.take_screenshot(),
+                        )
+                    )
+
+                scrolling = True
+                logger.debug("Activated scrolling mode")
+
+                await context._wait_for_page_and_frames_load()
+            elif data["status"] == "failure":
+                logger.debug(f"Completion reports step failed: {data['log']}")
+                report_logs.append(
+                    ReportLog(
+                        log="Failed to execute step: {data['log']}",
+                        screenshot_b64=await context.take_screenshot(),
+                    )
+                )
+                raise FailedStepError(f"Failed to execute step: {data['log']}")
+
+    async def handle_step(
+        self,
+        idx: int,
+        step_type: str,
+        step_content: str,
+        verifications: List[str],
+        context: BrowserContext,
+        run_id: str,
+        server_url: str,
+        report_logs: List[ReportLog],
+        dry_run: bool = False,
+    ) -> None:
+        page = await context.get_current_page()
+        if step_type == "goto":
+            await page.goto(step_content)
+            await context._wait_for_page_and_frames_load()
+            logger.info("Navigation completed successfully")
+            report_logs.append(
+                ReportLog(
+                    log="Navigation completed successfully",
+                    screenshot_b64=await context.take_screenshot(),
+                )
+            )
+        else:
+            await self._handle_complex_step(
+                idx, context, run_id, server_url, report_logs, dry_run
+            )
+
+        if verifications:
+            logger.info("Running step verifications")
+            await self.handle_verifications(
+                idx, step_content, context, run_id, server_url, report_logs, dry_run
+            )
+            logger.debug("Verifications completed successfully")
+        else:
+            logger.info("No verifications for this step")
+
+    def start(self, server_url: str, batch_id: str) -> str:
         ret = requests.post(
             f"{server_url}/api/v1/remote/runs",
             headers={
@@ -284,7 +482,6 @@ class TestCase:
             json={
                 "name": self.name,
                 "content": self.raw_content,
-                "secrets": given_secrets,
                 "batch_id": batch_id,
             },
         )
@@ -292,23 +489,122 @@ class TestCase:
         if ret.status_code != 201:
             raise RuntimeError(f"Failed to start run: {ret.json()}")
 
-        return ret.json()["run_id"]
+        data = ret.json()
+        logger.info(f"Successfully started running test {self.name} [{data['run_id']}]")
+        return data["run_id"]
 
-    def run(
-        self, run_id, update_queue: Queue, config: Config, browser_state: str
-    ) -> None:
-        with sync_playwright() as p:
-            page = initialize_page(p, config, browser_state)
-            self.status = "pending"
-            update_queue.put(True)
-            self.loop_until_done(page, run_id, update_queue, config.runtime.server_url)
-            update_queue.put(True)
+    @staticmethod
+    def initialize_browser_context(
+        config: Config, browser_state: Optional[str] = None
+    ) -> BrowserContext:
+        storage_state = None
+        if browser_state:
+            logger.info(f"Loading browser state from {browser_state}")
+            with open(browser_state, "r") as f:
+                storage_state = json.load(f)
 
-            # Save state of the page
-            output_file = f"{config.runtime.output_dir}/{self.name}.json"
-            os.makedirs(os.path.dirname(output_file), exist_ok=True)
-            page.context.storage_state(path=output_file)
-            page.close()
+        browser_config = BrowserConfig(headless=config.browser.headless)
+        browser = Browser(config=browser_config)
+
+        cookies_file = None
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
+            if storage_state and "cookies" in storage_state:
+                json.dump(storage_state["cookies"], f)
+                cookies_file = f.name
+
+            # Ref https://docs.browser-use.com/customize/browser-settings#context-configuration
+            context_config = BrowserContextConfig(
+                wait_for_network_idle_page_load_time=3,
+                browser_window_size={
+                    "width": config.browser.width,
+                    "height": config.browser.height,
+                },
+                # pass -1 for highlighting all elements in the page
+                viewport_expansion=0,
+                cookies_file=cookies_file,
+            )
+
+            return BrowserContext(browser=browser, config=context_config)
+
+    @staticmethod
+    async def teardown(context: BrowserContext, name: str, config: Config) -> None:
+        path = Path(config.runtime.output_dir) / f"{name}.json"
+        os.makedirs(path.parent, exist_ok=True)
+        await context.session.context.storage_state(path=path)
+        logger.debug(f"Browser state saved for {name} at {path}")
+        await context.close()
+        await context.browser.close()
+
+    async def run(
+        self,
+        run_id: str,
+        config: Config,
+        browser_state: Optional[str],
+        name: str,
+        dry_run: bool = False,
+    ) -> bool:
+        with logger.contextualize(test_name=name):
+            server_url = config.runtime.server_url
+            report_test_status(
+                run_id, {"status": "running" if not dry_run else "dry-run"}, server_url
+            )
+            logger.debug(f"Test {run_id} started running")
+
+            context = self.initialize_browser_context(config, browser_state)
+            logger.debug(f"Browser context initialized for {run_id}: {context}")
+
+            success = True
+            report: Dict[int, List[ReportLog]] = {}
+            for idx, step in enumerate(self.steps):
+                report[idx] = []
+                step_type, step_content = [(k, v) for k, v in step.items()][0]
+                with logger.contextualize(step=f"{step_type} {step_content}"):
+                    verifications: str | List[str] = step.get("verify", [])
+                    if isinstance(verifications, str):
+                        verifications_list: List[str] = [verifications]
+                    else:
+                        verifications_list = verifications
+
+                    logger.debug(
+                        f"Running step {idx}: {step_type} {step_content} [{len(verifications_list)} verifications]"
+                    )
+                    try:
+                        await self.handle_step(
+                            idx,
+                            step_type,
+                            step_content,
+                            verifications_list,
+                            context,
+                            run_id,
+                            server_url,
+                            report[idx],
+                            dry_run=dry_run,
+                        )
+                        logger.success("Step completed successfully")
+                    except FailedStepError as e:
+                        success = False
+                        logger.error(f"Failed to execute step: {str(e)}")
+                        break
+                    except Exception as e:
+                        logger.exception(f"Unexpected error: {e}")
+                        await self.teardown(context, name, config)
+                        raise
+
+            if not dry_run:
+                report_test_status(
+                    run_id,
+                    {
+                        "status": "finished",
+                        "conclusion": "success" if success else "failure",
+                    },
+                    server_url,
+                )
+
+            await self.teardown(context, name, config)
+            self.dump_report(config.runtime.output_dir, report)
+            report_path = Path(config.runtime.output_dir) / f"{name}.html"
+            logger.info(f"Report saved at {report_path}")
+            return success
 
 
 def collect_test_cases(test_files: List[str], tags: List[str], exclude_tags: List[str]):
@@ -336,181 +632,56 @@ def collect_test_cases(test_files: List[str], tags: List[str], exclude_tags: Lis
 class TestRunner:
     def __init__(self, testcases: List[TestCase]):
         self.testcases = testcases
-        self.console = Console()
-        self._update_queue: Queue = Queue()
-
-    def create_table(self) -> Table:
-        table = Table(show_header=True, header_style="bold", show_lines=True)
-        table.add_column("Status", justify="center", width=10)
-        table.add_column("Test Name", justify="left", width=30, overflow="fold")
-        table.add_column("Progress", justify="left", width=10)
-        table.add_column("Recent Logs", justify="left", width=60)
-
-        status_colors = {
-            "pending": "white",
-            "enqueued": "white",
-            "running": "deep_sky_blue1",
-            "success": "green",
-            "failure": "red",
-            "skipped": "yellow",
-            "cancelled": "yellow",
-            "error": "red",
-            "remote_timeout": "red",
-        }
-
-        for testcase in self.testcases:
-            status_style = f"{status_colors[testcase.status]}"
-
-            # Calculate step progress
-            total_steps = len(testcase.steps)
-            completed_steps = len(testcase.steps_results)
-            progress = f"{completed_steps}/{total_steps}"
-
-            # Format log entries
-            log_text = Text()
-            pending_logs = MAX_LOGS_DISPLAY - len(testcase.logs)
-            if pending_logs:
-                log_text.append(
-                    " \n"
-                    * (
-                        pending_logs
-                        if pending_logs < MAX_LOGS_DISPLAY
-                        else (MAX_LOGS_DISPLAY - 1)
-                    )
-                )
-
-            for i, log in enumerate(testcase.logs):
-                level_colors = {
-                    "info": "cyan",
-                    "warn": "yellow",
-                    "error": "red",
-                }
-                log_text.append(
-                    f'[{log["level"].upper()}] {log["msg"]}',
-                    style=level_colors.get(log["level"], "white"),
-                )
-                if i < len(testcase.logs) - 1:
-                    log_text.append("\n")
-
-            table.add_row(
-                f"[{status_style}]{testcase.status}[/]",
-                testcase.name,
-                progress,
-                log_text,
-            )
-
-        return table
 
     def run_tests(
-        self, config: Config, browser_state: Optional[str], batch_id: str
+        self, config: Config, browser_state: Optional[str], batch_id: str, dry_run: bool
     ) -> bool:
-        def update_display(live: Live):
-            """Background thread to update the display"""
-            while True:
-                update = self._update_queue.get()
-                if update is None:  # Sentinel value to stop the thread
-                    break
-                live.update(self.create_table())
+        future_to_test = {}
 
-        failed_tests = []
-
-        # Create live display
-        with Live(self.create_table(), refresh_per_second=5) as live:
-            # Start display update thread
-            display_thread = threading.Thread(target=update_display, args=(live,))
-            display_thread.start()
-
-            future_to_test = {}
-
-            # Run tests in parallel
-            with ThreadPoolExecutor(
-                max_workers=config.runtime.concurrent_workers
-            ) as executor:
-                for idx, testcase in enumerate(self.testcases):
+        with ThreadPoolExecutor(
+            max_workers=config.runtime.concurrent_workers
+        ) as executor:
+            for idx, testcase in enumerate(self.testcases):
+                with logger.contextualize(test_name=testcase.name):
                     run_id = testcase.start(config.runtime.server_url, batch_id)
 
                     # For debuggin purposes
                     def run_wrapper(*args, **kwargs):
                         try:
-                            return testcase.run(*args, **kwargs)
+                            return asyncio.run(testcase.run(*args, **kwargs))
                         except Exception:
                             print(traceback.format_exc())
                             raise
 
                     # Submit all tests
                     key = executor.submit(
-                        run_wrapper, run_id, self._update_queue, config, browser_state
+                        run_wrapper,
+                        run_id,
+                        config,
+                        browser_state,
+                        name=testcase.name,
+                        dry_run=True,
                     )
                     future_to_test[key] = testcase
 
-                for future in as_completed(future_to_test.keys()):
-                    test = future_to_test[future]
+            for future in as_completed(future_to_test.keys()):
+                result = future.result()
+                testcase = future_to_test[future]
 
-                    if test.status == "failure":
-                        failed_tests.append(test)
-
-                        if config.runtime.fail_fast:
-                            # This will stop the running futures
-                            # Thread share memory, so we can update its state
-                            # and the thread will read it.
-                            for testcase in future_to_test.values():
-                                testcase._should_stop = True
-
-            # Stop the display update thread
-            self._update_queue.put(None)
-            display_thread.join()
+                testcase.status = "success" if result else "failure"
 
         # Show summary and failed test details
         total = len(self.testcases)
         passed = sum(1 for t in self.testcases if t.status == "success")
-        failed = len(failed_tests)
+        failed = sum(1 for t in self.testcases if t.status == "failure")
 
-        if failed_tests:
-            self.console.print("\n=========== Failures ===========\n", style="bold red")
-            for test in failed_tests:
-                # Create detailed step report
-                steps_text = Text()
-                for i, step in enumerate(test.steps):
-                    status_color = "white"
-                    if len(test.steps_results) > i:
-                        status_color = (
-                            "green" if test.steps_results[i].success else "red"
-                        )
-                    action, content = [(k, v) for k, v in step.items()][0]
-                    steps_text.append(f"\n{action}: {content} ", style=status_color)
-
-                steps_text.append(
-                    f"\n\nError: {test.steps_results[-1].msg}", style="bold red"
-                )
-
-                panel = Panel(
-                    steps_text,
-                    title=f"[red]{test.name}[/] (Duration: {test.duration:.2f}s)",
-                    border_style="red",
-                )
-                self.console.print(panel)
-
-        if not failed:
-            self.console.print(
-                f"\n=========== [bold green]{passed}[/] tests passed ===========\n",
-                style="bold green",
+        if failed:
+            logger.error(
+                f"Test Report - Passed: {passed}, Failed: {failed}, Total: {total}"
             )
+            return False
         else:
-            success_rate = passed / total * 100
-            self.console.print(
-                f"========== [bold red]{failed} failed[/], [bold green]{passed} passed[/], [bold purple]{success_rate:.2f}% success rate[/] =========="
+            logger.success(
+                f"Test Report - Passed: {passed}, Failed: {failed}, Total: {total}"
             )
-
-        return failed == 0
-
-        # slowest_test = sorted(self.testcases, key=lambda t: t.duration, reverse=True)[0]
-        # fastest_test = sorted(self.testcases, key=lambda t: t.duration)[0]
-        # avg = sum(t.duration for t in self.testcases) / total
-
-        # self.console.print(
-        #     f"Slowest test: {slowest_test.name} [white]({slowest_test.duration:.2f}s)[/]"
-        # )
-        # self.console.print(
-        #     f"Fastest test: {fastest_test.name} [white]({fastest_test.duration:.2f}s)[/]"
-        # )
-        # self.console.print(f"Average duration: [white]{avg:.2f}s[/]")
+            return True

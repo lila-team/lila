@@ -1,0 +1,40 @@
+name: Failing run
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  github-stars:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.11"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+    - name: Install lila cli
+      run: |
+        pip install -e .
+    - name: Install playwright chromium
+      run: |
+        playwright install chromium
+    - name: Run Github Stars failing PR
+      env:
+        LILA_API_KEY: ${{ secrets.LILA_API_KEY  }}
+      run: |
+        lila run tests/failing.yaml
+    - name: Upload failing PR artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: lila-artifacts
+        path: lila-output/
+        retention-days: 30

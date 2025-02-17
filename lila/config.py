@@ -11,7 +11,7 @@ class Browser:
     type: str
     width: int
     height: int
-    headless: bool
+    headless: bool = False
 
     @classmethod
     def default(cls):

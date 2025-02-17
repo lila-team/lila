@@ -1,0 +1,6 @@
+steps:
+  - goto: https://github.com/django/django
+    verify: django repo has more than 1k stars
+
+  - click: on the PRs tab
+    verify: you see a list of PRs

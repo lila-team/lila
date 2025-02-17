@@ -1,0 +1,7 @@
+steps:
+  - goto: https://news.ycombinator.com/news
+
+  - input: Python in the search bar
+
+  - submit: the search
+    verify: there are more than 100k results

@@ -3,7 +3,7 @@ name = "lilacli"
 requires-python = ">=3.11"
 readme = "README.md"
 description = "A CLI for lila.dev"
-dependencies = ["click", "requests", "tenacity", "halo", "pyyaml", "playwright", "Pillow", "rich", "dacite"]
+dependencies = ["click", "loguru", "requests", "tenacity", "pyyaml", "playwright", "dacite", "browser-use~=0.1.36", "Jinja2"]
 dynamic = ['version']
 
 [project.scripts]
@@ -27,6 +27,7 @@ include = [
     "lila/assets/*.png",
     "lila/assets/*.toml",
     "lila/assets/*.yaml",
+    "lila/assets/*.html",
     "lila/**/*.py",
 ]
 

@@ -1,0 +1,13 @@
+[browser]
+type = "chromium"
+width = 1536
+height = 1152
+
+[runtime]
+fail_fast = true
+output_dir = "lila-output"
+concurrent_workers = 4
+server_url = 'https://app.lila.dev'
+# server_url = 'https://select-lightly-starfish.ngrok-free.app'
+# server_url = 'http://localhost:5000'
+# server_url = 'https://server-pr-6-5lhg.onrender.com'

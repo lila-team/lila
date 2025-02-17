@@ -1,0 +1,18 @@
+steps:
+  - goto: https://www.booking.com
+    verify: you see a search form
+
+  - input: Punta del Este in the destination
+    verify:
+      - there is a list of suggestions to select from
+      - first suggestion is Punta del Este, Uruguay
+
+  - click: on the first suggestion from the dropdown
+    verify: the calendar view to pick the dates show up
+
+  - click: next monday as the check-in date
+
+  - click: next friday as the check-out date
+
+  - submit: the search form
+    verify: you see a list of hotels

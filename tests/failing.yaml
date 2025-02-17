@@ -1,0 +1,4 @@
+steps:
+
+  - goto: https://github.com/django/django
+    verify: repo has no more than 1000 stars

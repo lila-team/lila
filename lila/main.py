@@ -10,14 +10,12 @@ from typing import Dict, List, Optional
 import click
 import requests
 import yaml
-from rich.console import Console
-from rich.markup import escape
+from loguru import logger
 
 from lila.config import Config
 from lila.const import API_KEY_URL
 from lila.runner import TestRunner, collect_test_cases
-from lila.utils import parse_tags
-from lila.version import get_version
+from lila.utils import parse_tags, setup_logging
 
 
 def validate_content(content: str, server_url: str) -> None:
@@ -73,9 +71,7 @@ def raise_for_status(response: requests.Response):
 @click.group()
 def cli():
     """Lila CLI tool."""
-    console = Console()
-    console.print("Lila CLI ", style="bold violet", end="")
-    console.print(f"[not bold violet]{get_version()}[/]", end="\n\n")
+    pass
 
 
 def collect(path) -> List[str]:
@@ -141,7 +137,16 @@ def _get_config(config_file: Optional[str]) -> Config:
     "--output-dir", type=str, help="Override config output directory", required=False
 )
 @click.option(
-    "--batch-id", type=str, help="Batch ID to group test runs", required=False
+    "--debug",
+    is_flag=True,
+    help="Enable debug mode",
+    default=False,
+)
+@click.option(
+    "--headless",
+    is_flag=True,
+    help="Run tests in headless mode",
+    default=False,
 )
 def run(
     path: str,
@@ -150,32 +155,40 @@ def run(
     config: Optional[str],
     browser_state: Optional[str],
     output_dir: Optional[str],
-    batch_id: Optional[str],
+    debug: bool = False,
+    headless: bool = False,
 ):
     """Run a Lila test suite."""
-    console = Console()
+    setup_logging(debug=debug)
+    # This were previously run flags,
+    # will add the later once webapp
+    # is more stable.
+    dry_run = True
+    batch_id = None
 
     if "LILA_API_KEY" not in os.environ:
-        console.print(
-            f"Please set the LILA_API_KEY environment variable. You can find it in the Lila app: {API_KEY_URL}",
-            style="bold red",
+        logger.error(
+            "Please set the LILA_API_KEY environment variable. You can find it in the Lila app: %s",
+            API_KEY_URL,
         )
         return
 
     try:
         config_obj = _get_config(config)
     except FileNotFoundError as e:
-        console.print(str(e), style="bold red")
+        logger.error(str(e))
 
     if output_dir:
         config_obj.runtime.output_dir = output_dir
+
+    config_obj.browser.headless = headless
 
     tag_list = []
     if tags:
         try:
             tag_list = parse_tags(tags)
         except ValueError as e:
-            console.print(str(e), style="bold red")
+            logger.error(str(e))
             return
 
     exclude_tag_list = []
@@ -183,46 +196,39 @@ def run(
         try:
             exclude_tag_list = parse_tags(exclude_tags)
         except ValueError as e:
-            console.print(str(e), style="bold red")
+            logger.error(str(e))
             return
 
     # If intersection of tags and exclude_tags is not empty, raise an error
     if set(tag_list) & set(exclude_tag_list):
-        console.print(
-            escape(
-                f"Tags and exclude-tags cannot have common elements: {tag_list} and {exclude_tag_list}"
-            ),
-            style="bold red",
+        logger.error(
+            "Tags and exclude-tags cannot have common elements: %s and %s",
+            tag_list,
+            exclude_tag_list,
         )
         return
 
     if browser_state and not os.path.exists(browser_state):
-        console.print(
-            f"Browser state file not found: {browser_state}", style="bold red"
-        )
+        logger.error("Browser state file not found: %s", browser_state)
         return
 
     test_files = collect(path)
     if not test_files:
-        console.print(
-            f"No YAML files found in the provided path: {path}", style="bold red"
-        )
+        logger.error("No YAML files found in the provided path: %s", path)
         return
 
     invalid_files = find_parsing_errors(test_files, config_obj.runtime.server_url)
     if invalid_files:
-        console.print("=== Parsing Errors ===", style="bold")
+        logger.error("Parsing errors found")
         for path, error in invalid_files.items():
-            console.print(f"File: [bold]{path}[/]", style="bold red")
-            console.print(f"Error: {error}", style="bold red")
+            logger.error("File %s: %s", path, error)
         return
 
     testcases = collect_test_cases(test_files, tag_list, exclude_tag_list)
 
     if not testcases:
-        console.print(
-            "No test cases found with the provided path and the provided params",
-            style="bold red",
+        logger.error(
+            "No test cases found with the provided path and the provided params"
         )
         return
 
@@ -230,10 +236,9 @@ def run(
         batch_id = str(uuid.uuid4())
 
     runner = TestRunner(testcases)
-    console.print(
-        f"[bold]Track your test run at: {config_obj.runtime.server_url}/runs/{batch_id}[/]"
-    )
-    success = runner.run_tests(config_obj, browser_state, batch_id)
+    if not dry_run:
+        logger.info("Tracking URL: %s/runs/%s", config_obj.runtime.server_url, batch_id)
+    success = runner.run_tests(config_obj, browser_state, batch_id, dry_run)
     if not success:
         sys.exit(1)
 
@@ -241,33 +246,24 @@ def run(
 @cli.command()
 def init():
     """Initialize a Lila testing template."""
-    console = Console()
     if os.path.exists("lila.toml"):
-        console.print(
-            "Config file already exists (lila.toml), it seems like the application is already initialized.",
-            style="bold red",
+        logger.error(
+            "Config file lila.toml already exists, it seems like the application is already initialized."
         )
         return
 
     # Create a lila.toml file
     config_path = Path(__file__).parent / "assets" / "lila.toml"
     shutil.copy(config_path, "lila.toml")
-    console.print("Config file created: [bold]lila.toml[/]", style="bold green")
+    logger.info("Config file created: lila.toml")
 
     # Create a lila directory
     os.makedirs("lila-tests", exist_ok=True)
     os.makedirs("lila-tests/out", exist_ok=True)
-    console.print(
-        "Test cases directory created: [bold]lila-tests[/]", style="bold green"
-    )
+    logger.info("Test cases directory created: lila-tests")
 
     # Create an example test case
     example_path = Path(__file__).parent / "assets" / "example.yaml"
     shutil.copy(example_path, "lila-tests/google-search.yaml")
-    console.print(
-        "Example test case created: [bold]lila-tests/google-search.yaml[/]",
-        style="bold green",
-    )
-
-    console.print("All set! Run your first test:\n", style="bold green")
-    console.print("lila run lila-tests", style="bold purple")
+    logger.info("Example test case created: lila-tests/google-search.yaml")
+    logger.success("All set! Run your first test: lila run lila-tests")

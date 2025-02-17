@@ -1,0 +1,13 @@
+tags:
+  - no-auth
+
+
+steps:
+  - goto: https://calendly.com/surfing-devs/30min
+    verify: there is a calendar view with the current month
+  - click: on the next available day
+    verify: there is a list of available hours on the right
+  - click: on the first available time slot
+    verify: a 'Next' button appears
+  - click: in the 'Next' button
+    verify: you see a form to schedule the meeting.
