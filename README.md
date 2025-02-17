@@ -2,6 +2,8 @@
 
 [![PyPI version](https://badge.fury.io/py/lilacli.svg)](https://badge.fury.io/py/lilacli)
 [![Documentation Status](https://readthedocs.org/projects/lila/badge/?version=latest)](https://docs.lila.dev)
+[![CI](https://github.com/lila-team/lila/actions/workflows/daily-run.yml/badge.svg)](https://github.com/lila-team/lila/actions/workflows/daily-run.yml)
+
 
 Lila CLI is a powerful tool for running end-to-end tests written in human-readable plain text using YAML files. It simplifies the testing process by allowing anyone in the team to write tests in a natural, easy-to-understand format.
 

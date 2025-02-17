@@ -1,4 +1,4 @@
-name: Lila daily run
+name: Smoke tests
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-    - name: Install lila cli
+    - name: Install lila cli from source
       run: |
         pip install -e .
     - name: Install playwright chromium
