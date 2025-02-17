@@ -30,7 +30,7 @@ jobs:
       env:
         LILA_API_KEY: ${{ secrets.LILA_API_KEY  }}
       run: |
-        lila run tests/calendly.yaml
+        lila run tests/calendly.yaml --headless
   google-maps:
     runs-on: ubuntu-latest
     steps:
@@ -52,7 +52,7 @@ jobs:
       env:
         LILA_API_KEY: ${{ secrets.LILA_API_KEY  }}
       run: |
-        lila run tests/google-maps.yaml
+        lila run tests/google-maps.yaml --headless
   github:
     runs-on: ubuntu-latest
     steps:
@@ -74,26 +74,26 @@ jobs:
       env:
         LILA_API_KEY: ${{ secrets.LILA_API_KEY  }}
       run: |
-        lila run tests/github.yaml
-  # booking:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #   - uses: actions/checkout@v4
-  #   - name: Set up Python 3.11
-  #     uses: actions/setup-python@v3
-  #     with:
-  #       python-version: "3.11"
-  #   - name: Install dependencies
-  #     run: |
-  #       python -m pip install --upgrade pip
-  #   - name: Install lila cli
-  #     run: |
-  #       pip install -e .
-  #   - name: Install playwright chromium
-  #     run: |
-  #       playwright install chromium
-  #   - name: Run Github
-  #     env:
-  #       LILA_API_KEY: ${{ secrets.LILA_API_KEY  }}
-  #     run: |
-  #       lila run tests/booking.yaml --dry-run
+        lila run tests/github.yaml --headless
+  google-search:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.11"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+    - name: Install lila cli
+      run: |
+        pip install -e .
+    - name: Install playwright chromium
+      run: |
+        playwright install chromium
+    - name: Run Google Search
+      env:
+        LILA_API_KEY: ${{ secrets.LILA_API_KEY  }}
+      run: |
+        lila run tests/google-search.yaml --headless

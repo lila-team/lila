@@ -30,7 +30,7 @@ jobs:
       env:
         LILA_API_KEY: ${{ secrets.LILA_API_KEY  }}
       run: |
-        lila run tests/failing.yaml
+        lila run tests/gh-stars.yaml --headless
     - name: Upload failing PR artifact
       if: always()
       uses: actions/upload-artifact@v4

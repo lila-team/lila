@@ -1,0 +1,11 @@
+steps:
+  - goto: https://google.com
+    verify: there is a main search bar
+  - input: Orcas in the search bar
+    verify: a dropdown with suggestions appears
+  - click: on the first suggestion from the dropdown
+    verify: the search results are related to orcas
+  - click: on the images tab
+    verify: there are images of orcas
+  - click: on the 3rd image
+    verify: there is a bigger version of the image at the right side
