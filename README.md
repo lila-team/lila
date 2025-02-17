@@ -4,6 +4,7 @@
 [![Documentation Status](https://readthedocs.org/projects/lila/badge/?version=latest)](https://docs.lila.dev)
 [![CI](https://github.com/lila-team/lila/actions/workflows/daily-run.yml/badge.svg)](https://github.com/lila-team/lila/actions/workflows/daily-run.yml)
 
+**Lila is the best testing framework for fast moving teams developing webapps.**
 
 Lila CLI is a powerful tool for running end-to-end tests written in human-readable plain text using YAML files. It simplifies the testing process by allowing anyone in the team to write tests in a natural, easy-to-understand format.
 
@@ -17,22 +18,26 @@ Lila runs your app in a **local browser** with [Playwright](https://playwright.d
 
 ### Why Lila?
 
-* No coding required
-* Self healing tests, does not rely on low level implementation
-* Anyone in the team can implement tests
-* Integrates natively with Playwright storage states
-* Runs browser locally, making it ideal for localdev or staging environments
+* No coding required.
+* Self healing tests, does not rely on low level implementation.
+* Anyone in the team can implement tests.
+* Integrates natively with Playwright storage states.
+* Runs browser locally, making it ideal for localdev or staging environments.
 
 ### Test example
 
 ```yaml
 steps:
   - goto: https://google.com
-  - search: for "Orcas"
+    verify: there is a main search bar
+  - input: Orcas in the search bar
+    verify: a dropdown with suggestions appears
+  - click: on the first suggestion from the dropdown
+    verify: the search results are related to orcas
   - click: on the images tab
-  - verify: there are images of orcas
+    verify: there are images of orcas
   - click: on the 3rd image
-  - verify: it opens a panel with the augmented image
+    verify: there is a bigger version of the image at the right side
 ```
 
 For more information on how to build tests, [checkout the guides](https://docs.lila.dev/guides/intro)
@@ -77,7 +82,9 @@ LILA_API_KEY=<your-api-key> lila run <folder/file>
 * `--tags`: Filter tests by specified comma-separated tags
 * `--exclude-tags`: Filter out tests by specified comma-separated tags
 * `--output-dir`: Specify the output directory for the browser states
-* `--config`: Point to the `lila.toml` config file if not using the root locaiton
+* `--config`: Point to the `lila.toml` config file if not using the root location
+* `--headless`: If present, does not open browser
+* `--debug`: Displays debug logs
 
 #### Example runs
 
@@ -101,7 +108,6 @@ Configuration example
 type = "chromium"
 width = 1536
 height = 1152
-headless = true
 
 [runtime]
 fail_fast = true
