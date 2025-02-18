@@ -123,7 +123,7 @@ server_url = 'https://app.lila.dev'
 
 ## Documentation
 
-For comprehensive documentation, visit [docs.lila.dev](https://docs.lila.dev). The documentation includes:
+For comprehensive documentation, visit [docs.lila.dev](https://docs.lila.dev).
 
 ## Examples
 
