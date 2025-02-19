@@ -371,3 +371,6 @@ pip-selfcheck.json
 .python-version
 
 # End of https://www.toptal.com/developers/gitignore/api/python,vim,macos,linux,virtualenv,pycharm
+
+
+lila-output/
