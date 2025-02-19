@@ -1,16 +1,18 @@
-[<img src="assets/logo.png">](https://lila.dev/)
+[<img src="assets/logo.png" width=300>](https://lila.dev/)
 
 [![PyPI version](https://badge.fury.io/py/lilacli.svg)](https://badge.fury.io/py/lilacli)
 [![Documentation Status](https://readthedocs.org/projects/lila/badge/?version=latest)](https://docs.lila.dev)
 [![CI](https://github.com/lila-team/lila/actions/workflows/daily-run.yml/badge.svg)](https://github.com/lila-team/lila/actions/workflows/daily-run.yml)
+[![Twitter](https://img.shields.io/twitter/follow/lila__dev?style=social)](https://twitter.com/lila__dev)
+[![Discord](https://img.shields.io/discord/1303067047931936809?label=Discord)](https://discord.gg/kZ7TEmxH)
+![GitHub Repo stars](https://img.shields.io/github/stars/lila-team/lila)
 
-**Lila is the best testing framework for fast moving teams developing webapps.**
+**[Lila](https://lila.dev) is the best testing framework for fast moving teams developing webapps.**
 
 Lila CLI is a powerful tool for running end-to-end tests written in human-readable plain text using YAML files. It simplifies the testing process by allowing anyone in the team to write tests in a natural, easy-to-understand format.
 
 **No coding required.**
 
-Visit Lila at [https://lila.dev](https://lila.dev)
 
 ### How does it work?
 
@@ -28,16 +30,13 @@ Lila runs your app in a **local browser** with [Playwright](https://playwright.d
 
 ```yaml
 steps:
-  - goto: https://google.com
-    verify: there is a main search bar
-  - input: Orcas in the search bar
+  - goto: https://www.google.com/maps
+
+  - input: Empire State on the main search bar
     verify: a dropdown with suggestions appears
+
   - click: on the first suggestion from the dropdown
-    verify: the search results are related to orcas
-  - click: on the images tab
-    verify: there are images of orcas
-  - click: on the 3rd image
-    verify: there is a bigger version of the image at the right side
+    verify: the map shows the Empire State Building in NY
 ```
 
 For more information on how to build tests, [checkout the guides](https://docs.lila.dev/guides/intro)
@@ -56,6 +55,12 @@ Lila CLI requires Python 3.11 or higher. Install it using pip:
 
 ```bash
 pip install lilacli
+```
+
+Install Chromium web drivers for Playwright
+
+```bash
+playwright install chromium
 ```
 
 ### Quick Start
@@ -113,11 +118,12 @@ height = 1152
 fail_fast = true
 output_dir = "lila-output"
 concurrent_workers = 4
+server_url = 'https://app.lila.dev'
 ```
 
 ## Documentation
 
-For comprehensive documentation, visit [docs.lila.dev](https://docs.lila.dev). The documentation includes:
+For comprehensive documentation, visit [docs.lila.dev](https://docs.lila.dev).
 
 ## Examples
 
