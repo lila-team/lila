@@ -168,8 +168,7 @@ def run(
 
     if "LILA_API_KEY" not in os.environ:
         logger.error(
-            "Please set the LILA_API_KEY environment variable. You can find it in the Lila app: %s",
-            API_KEY_URL,
+            f"Please set the LILA_API_KEY environment variable. You can find it in the Lila app: {API_KEY_URL}"
         )
         return
 
@@ -202,26 +201,24 @@ def run(
     # If intersection of tags and exclude_tags is not empty, raise an error
     if set(tag_list) & set(exclude_tag_list):
         logger.error(
-            "Tags and exclude-tags cannot have common elements: %s and %s",
-            tag_list,
-            exclude_tag_list,
+            f"Tags and exclude-tags cannot have common elements: {tag_list} and {exclude_tag_list}"
         )
         return
 
     if browser_state and not os.path.exists(browser_state):
-        logger.error("Browser state file not found: %s", browser_state)
+        logger.error(f"Browser state file not found: {browser_state}")
         return
 
     test_files = collect(path)
     if not test_files:
-        logger.error("No YAML files found in the provided path: %s", path)
+        logger.error(f"No YAML files found in the provided path: {path}")
         return
 
     invalid_files = find_parsing_errors(test_files, config_obj.runtime.server_url)
     if invalid_files:
         logger.error("Parsing errors found")
         for path, error in invalid_files.items():
-            logger.error("File %s: %s", path, error)
+            logger.error(f"File {path}: {error}")
         return
 
     testcases = collect_test_cases(test_files, tag_list, exclude_tag_list)
@@ -236,8 +233,6 @@ def run(
         batch_id = str(uuid.uuid4())
 
     runner = TestRunner(testcases)
-    if not dry_run:
-        logger.info("Tracking URL: %s/runs/%s", config_obj.runtime.server_url, batch_id)
     success = runner.run_tests(config_obj, browser_state, batch_id, dry_run)
     if not success:
         sys.exit(1)

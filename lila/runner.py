@@ -457,6 +457,17 @@ class TestCase:
                     screenshot_b64=await context.take_screenshot(),
                 )
             )
+        elif step_type == "wait":
+            seconds = int(step_content)
+            logger.info(f"Waiting for {step_content} seconds")
+            await page.wait_for_timeout(seconds * 1000)
+            logger.info("Wait completed successfully")
+            report_logs.append(
+                ReportLog(
+                    log="Wait completed successfully",
+                    screenshot_b64=await context.take_screenshot(),
+                )
+            )
         else:
             await self._handle_complex_step(
                 idx, context, run_id, server_url, report_logs, dry_run
