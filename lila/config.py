@@ -8,14 +8,13 @@ from lila import const
 
 @dataclass
 class Browser:
-    type: str
     width: int
     height: int
     headless: bool = False
 
     @classmethod
     def default(cls):
-        return cls(type="chromium", width=const.WIDTH, height=const.HEIGHT)
+        return cls(width=const.WIDTH, height=const.HEIGHT, headless=False)
 
 
 @dataclass
@@ -23,14 +22,14 @@ class Runtime:
     concurrent_workers: int
     fail_fast: bool
     output_dir: str
-    server_url: str
+    server_url: str = const.BASE_URL
 
     @classmethod
     def default(cls):
         return cls(
             concurrent_workers=5,
             fail_fast=False,
-            output_dir="lila-results",
+            output_dir="lila-output",
             server_url=const.BASE_URL,
         )
 

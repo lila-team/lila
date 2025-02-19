@@ -1,7 +1,0 @@
-steps:
-  - goto: https://google.com
-  - search: for "Orcas"
-  - click: on the images tab
-  - verify: there are images of orcas
-  - click: on the 3rd image
-  - verify: it opens a panel with the augmented image

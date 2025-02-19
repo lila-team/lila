@@ -1,5 +1,6 @@
 tags:
-  - no-auth
+  - foo
+  - bar
 
 
 steps:

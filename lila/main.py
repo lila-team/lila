@@ -258,15 +258,14 @@ def init():
     logger.info("Config file created: lila.toml")
 
     # Create a lila directory
-    os.makedirs("lila-tests", exist_ok=True)
-    os.makedirs("lila-tests/out", exist_ok=True)
-    logger.info("Test cases directory created: lila-tests")
+    os.makedirs("lila-output", exist_ok=True)
+    logger.info("Output directory created for artifacts: lila-output/")
 
     # Create an example test case
-    example_path = Path(__file__).parent / "assets" / "example.yaml"
-    shutil.copy(example_path, "lila-tests/google-search.yaml")
-    logger.info("Example test case created: lila-tests/google-search.yaml")
-    logger.success("All set! Run your first test: lila run lila-tests")
+    example_path = Path(__file__).parent.parent / "tests" / "google-maps.yaml"
+    shutil.copy(example_path, "demo.yaml")
+    logger.info("Example test case created: demo.yaml")
+    logger.success("All set! Run your first test: lila run demo.yaml")
 
 
 @click.option("--config", type=str, help="Path to the Lila config file", required=False)

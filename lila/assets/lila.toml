@@ -6,6 +6,6 @@ headless = true
 
 [runtime]
 fail_fast = true
-output_dir = "lila-tests/out"
+output_dir = "lila-output"
 concurrent_workers = 4
 server_url = 'https://app.lila.dev'
