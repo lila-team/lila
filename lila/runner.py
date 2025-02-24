@@ -30,6 +30,7 @@ from lila.utils import (
     press_key,
     pretty_step_formatter,
     render_template_to_file,
+    run_command,
     send_state,
 )
 
@@ -465,6 +466,31 @@ class TestCase:
             report_logs.append(
                 ReportLog(
                     log="Wait completed successfully",
+                    screenshot_b64=await context.take_screenshot(),
+                )
+            )
+        elif step_type == "exec":
+            cmds = step_content.split("\n")
+            for cmd in cmds:
+                if cmd:
+                    logger.info(f"Executing command: {cmd}")
+                    stdout, stderr, rc = await run_command(cmd)
+                    if rc != 0:
+                        logger.error(f"Failed to execute command: {stderr}")
+                        logger.error(f"Command output: {stdout.decode()}")
+                        logger.error(f"Command error: {stderr.decode()}")
+                        logger.error(f"Command return code: {rc}")
+                        report_logs.append(
+                            ReportLog(
+                                log=f"Failed to execute command {cmd}: {stderr.decode()}",
+                                screenshot_b64=await context.take_screenshot(),
+                            )
+                        )
+                        raise FailedStepError(f"Failed to execute command: code {rc}")
+            logger.info("Commands executed successfully")
+            report_logs.append(
+                ReportLog(
+                    log="Commands executed successfully",
                     screenshot_b64=await context.take_screenshot(),
                 )
             )

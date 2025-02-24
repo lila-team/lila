@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import sys
@@ -18,12 +19,6 @@ from jinja2 import Template
 from loguru import logger
 
 from lila.const import INCLUDE_ATTRIBUTES
-
-
-@dataclass
-class Pointer:
-    x: int
-    y: int
 
 
 def parse_tags(value: str) -> List[str]:
@@ -223,6 +218,7 @@ def setup_logging(debug: bool):
         if "test_name" in record["extra"]:
             MAX_STEP_LENGTH = 20
             if "step" in record["extra"]:
+                record["extra"]["step"] = record["extra"]["step"].replace("\n", " ")
                 if len(record["extra"]["step"]) > MAX_STEP_LENGTH:
                     ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"][:MAX_STEP_LENGTH]}...]</cyan> '
                 else:
@@ -279,3 +275,17 @@ def render_template_to_file(template_path, output_file, data):
     except Exception as e:
         logger.error(f"Error rendering template: {str(e)}")
         return False
+
+
+async def run_command(command):
+    # Create the subprocess
+    process = await asyncio.create_subprocess_shell(
+        command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+
+    # Read stdout and stderr
+    stdout, stderr = await process.communicate()
+
+    # Get the return code
+    return_code = process.returncode
+    return stdout, stderr, return_code

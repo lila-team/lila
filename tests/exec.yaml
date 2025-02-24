@@ -1,0 +1,17 @@
+tags:
+  - foo
+  - bar
+
+
+steps:
+  - goto: https://example.org/
+
+  - exec: python -V
+
+  - exec: |
+      curl -s https://example.org/ | grep -q "Example Domain"
+
+  - exec: |
+      ls -l /tmp
+      echo "Hello, World!" > /tmp/hello.txt
+      cat /tmp/hello.txt
