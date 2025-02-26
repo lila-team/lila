@@ -1,6 +1,6 @@
 [<img src="assets/logo.png" width=300>](https://lila.dev/)
 
-[![PyPI version](https://badge.fury.io/py/lilacli.svg)](https://badge.fury.io/py/lilacli)
+[![PyPI - Version](https://img.shields.io/pypi/v/lilacli?color=blue)](https://pypi.org/project/lilacli/)
 [![Documentation Status](https://readthedocs.org/projects/lila/badge/?version=latest)](https://docs.lila.dev)
 [![CI](https://github.com/lila-team/lila/actions/workflows/daily-run.yml/badge.svg)](https://github.com/lila-team/lila/actions/workflows/daily-run.yml)
 [![Twitter](https://img.shields.io/twitter/follow/lila__dev?style=social)](https://twitter.com/lila__dev)
