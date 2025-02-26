@@ -91,7 +91,9 @@ steps:
 
 ```yaml
 - click: on the checkout cart
+# or
 - click: on the direction item
+# or
 - click: on button 'Create'
 ```
 
@@ -99,6 +101,7 @@ steps:
 
 ```yaml
 - input: foo@bar.com as email
+# or
 - input: iPad mini in the main search bar
 ```
 
@@ -106,6 +109,7 @@ steps:
 
 ```yaml
 - submit: the login form
+# or
 - submit: the search
 ```
 
@@ -124,8 +128,11 @@ steps:
 **exec**: run a bash command
 
 ```yaml
-- exec: |
+- exec: |  # multiline
     curl -X POST ...
+
+# or
+- exec: psql -c "INSERT ..." # single line
 ```
 
 ### Verifications
@@ -137,7 +144,7 @@ Each step can have one or more `verify` assertions.
   verify: there is a login form with username and password  # Single verification
 
 - click: the checkout cart
-  verify:
+  verify:  # multi verifications
     - 5 items appear in the purchase summary
     - the total is 500 USD
 ```
