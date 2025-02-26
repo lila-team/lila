@@ -241,6 +241,8 @@ def run(
 @cli.command()
 def init():
     """Initialize a Lila testing template."""
+    setup_logging(debug=False)
+
     if os.path.exists("lila.toml"):
         logger.error(
             "Config file lila.toml already exists, it seems like the application is already initialized."
