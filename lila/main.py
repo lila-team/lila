@@ -252,12 +252,17 @@ def init():
     shutil.copy(config_path, "lila.toml")
     logger.info("Config file created: lila.toml")
 
+    # Create a gitignore file
+    gitignore_path = Path(__file__).parent / "assets" / "gitignore"
+    shutil.copy(gitignore_path, ".gitignore")
+    logger.info("Generated gitignore file")
+
     # Create a lila directory
     os.makedirs("lila-output", exist_ok=True)
     logger.info("Output directory created for artifacts: lila-output/")
 
     # Create an example test case
-    example_path = Path(__file__).parent.parent / "tests" / "google-maps.yaml"
+    example_path = Path(__file__).parent / "assets" / "google-maps.yaml"
     shutil.copy(example_path, "demo.yaml")
     logger.info("Example test case created: demo.yaml")
     logger.success("All set! Run your first test: lila run demo.yaml")

@@ -1,0 +1,6 @@
+# Created by Lila
+# Feel free to adjust
+
+.env
+.lila.log
+lila-output/

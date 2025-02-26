@@ -1,0 +1,23 @@
+tags:
+  - foo
+  - bar
+
+
+steps:
+  - goto: https://maps.google.com
+    verify: you see a map
+
+  - click: on the directions icon in the search bar represented by a blue arrow
+    verify: there is a form with two input fields, one for the starting point and one for the destination
+
+  - input: Empire state building in NY as the starting point
+    verify: there is a dropdown with suggestions
+
+  - click: on the first suggestion from the dropdown
+    verify: the map now points to the Empire state building
+
+  - input: Museum of Modern Art in NY as the destination
+    verify: there is a dropdown with suggestions
+
+  - click: on the first suggestion from the dropdown
+    verify: the map now shows the route from the Empire state building to the Museum of Modern Art

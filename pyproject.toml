@@ -28,6 +28,7 @@ include = [
     "lila/assets/*.toml",
     "lila/assets/*.yaml",
     "lila/assets/*.html",
+    "lila/assets/gitignore",
     "lila/**/*.py",
 ]
 
