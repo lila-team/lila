@@ -13,7 +13,7 @@ import yaml
 from loguru import logger
 
 from lila.config import Config
-from lila.const import API_KEY_URL
+from lila.const import BASE_URL
 from lila.runner import TestRunner, collect_test_cases
 from lila.utils import parse_tags, setup_logging
 
@@ -168,7 +168,7 @@ def run(
 
     if "LILA_API_KEY" not in os.environ:
         logger.error(
-            f"Please set the LILA_API_KEY environment variable. You can find it in the Lila app: {API_KEY_URL}"
+            f"Please set the LILA_API_KEY environment variable. You can find it in the Lila app: {BASE_URL}"
         )
         return
 
@@ -259,6 +259,11 @@ def init():
     shutil.copy(gitignore_path, ".gitignore")
     logger.info("Generated gitignore file")
 
+    dotenv_template = Path(__file__).parent / "assets" / "env"
+    if not os.path.exists(os.path.join(os.getcwd(), ".env")):
+        shutil.copy(dotenv_template, ".env")
+        logger.info("Generated .env file")
+
     # Create a lila directory
     os.makedirs("lila-output", exist_ok=True)
     logger.info("Output directory created for artifacts: lila-output/")
@@ -279,7 +284,13 @@ def check(
     setup_logging(debug=False)
     if "LILA_API_KEY" not in os.environ:
         logger.error(
-            f"Please set the LILA_API_KEY environment variable. You can find it in the Lila app: {API_KEY_URL}"
+            f"Please set the LILA_API_KEY environment variable in your .env file or as a command environment variable. You can find it in the Lila app: {BASE_URL}"
+        )
+        return
+
+    if os.environ["LILA_API_KEY"] == "<insert-your-api-key>":
+        logger.error(
+            f"Place your API key in the .env file. You can find it in the Lila app: {BASE_URL}"
         )
         return
 
@@ -303,4 +314,6 @@ def check(
         sys.exit(1)
         return
 
+    data = ret.json()
+    logger.success(f"API Key valid for team: {data['team']}")
     logger.success("Lila is properly set up and ready to run tests.")

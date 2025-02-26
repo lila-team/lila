@@ -1,4 +1,10 @@
 import logging
+import os
+
+from dotenv import load_dotenv
+
+dotenv_path = os.path.join(os.getcwd(), ".env")
+load_dotenv(dotenv_path=dotenv_path)
 
 
 # Create a passthrough handler to avoid browser-use
