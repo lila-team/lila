@@ -171,7 +171,7 @@ For example:
 
 **login.yaml**:
 
-```
+```yaml
 steps:
   - goto: https://my-app.com/login
   - input: foobar as username
@@ -184,7 +184,7 @@ steps:
 
 **dashboard.yaml** (needs a logged in user)
 
-```
+```yaml
 steps:
   - goto: https://my-app.com/dashboard
     verify: there is a panel displaying metrics
@@ -205,7 +205,6 @@ steps:
 ## CI/CD ready
 
 Checkout [an example for a daily run using GHA](.github/workflows/daily-run.yaml)
-
 
 ## Documentation
 
