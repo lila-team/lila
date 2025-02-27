@@ -58,52 +58,6 @@ def report_test_status(run_id: str, payload: Dict, server_url: str) -> None:
     logger.debug(f"Successfully reported test status for run {run_id}")
 
 
-def report_step_result(
-    run_id: str, idx: int, result: str, msg: str, server_url: str
-) -> None:
-    ret = requests.put(
-        f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/result",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
-        },
-        json={"result": result, "msg": msg},
-    )
-    ret.raise_for_status()
-    logger.debug(f"Successfully reported step result for run {run_id}")
-
-
-def send_step_screenshot(
-    run_id: str, idx: int, screenshot_b64: str, server_url: str
-) -> None:
-    ret = requests.post(
-        f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/screenshots",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
-        },
-        json={"screenshot_b64": screenshot_b64},
-    )
-    ret.raise_for_status()
-    logger.debug(f"Successfully sent screenshot for run {run_id}")
-
-
-def send_step_log(run_id: str, idx: int, level: str, msg: str, server_url: str) -> None:
-    ret = requests.post(
-        f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/logs",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
-        },
-        json={"level": level, "msg": msg},
-    )
-    ret.raise_for_status()
-    logger.debug(f"Successfully sent log for run {run_id}")
-
-
 @dataclass
 class StepResult:
     success: bool
@@ -220,14 +174,17 @@ class TestCase:
             )
             raise FailedStepError(f"Failed to execute step: {result['log']}")
 
-        logger.debug(f"Verification passed for '{verification}': {result['log']}")
-        logger.info(f"Verification passed: {result['log']}")
-        report_logs.append(
-            ReportLog(
-                log=f"Verification passed: {result['log']}",
-                screenshot_b64=await context.take_screenshot(),
+        if result["status"] == "complete":
+            logger.debug(f"Verification passed for '{verification}': {result['log']}")
+            logger.info(f"Verification passed: {result['log']}")
+            report_logs.append(
+                ReportLog(
+                    log=f"Verification passed: {result['log']}",
+                    screenshot_b64=await context.take_screenshot(),
+                )
             )
-        )
+        else:
+            raise RuntimeError(f"Unknown verification status: {result['status']}")
 
     async def _handle_complex_step(
         self,
@@ -642,6 +599,13 @@ class TestCase:
                         break
                     except Exception as e:
                         logger.exception(f"Unexpected error: {e}")
+                        report_test_status(
+                            run_id,
+                            {
+                                "status": "internal-error",
+                            },
+                            server_url,
+                        )
                         await self.teardown(context, name, config)
                         raise
 
