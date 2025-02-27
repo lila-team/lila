@@ -542,6 +542,7 @@ class TestCase:
             json={
                 "name": self.name,
                 "content": self.raw_content,
+                "batch_id": str(uuid.uuid4()),  # tmp we could track later by batch
             },
         )
         ret.raise_for_status()
