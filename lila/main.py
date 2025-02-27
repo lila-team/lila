@@ -3,7 +3,6 @@ import os
 import pathlib
 import shutil
 import sys
-import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -160,11 +159,6 @@ def run(
 ):
     """Run a Lila test suite."""
     setup_logging(debug=debug)
-    # This were previously run flags,
-    # will add the later once webapp
-    # is more stable.
-    dry_run = True
-    batch_id = None
 
     if "LILA_API_KEY" not in os.environ:
         logger.error(
@@ -229,11 +223,8 @@ def run(
         )
         return
 
-    if not batch_id:
-        batch_id = str(uuid.uuid4())
-
     runner = TestRunner(testcases)
-    success = runner.run_tests(config_obj, browser_state, batch_id, dry_run)
+    success = runner.run_tests(config_obj, browser_state)
     if not success:
         sys.exit(1)
 

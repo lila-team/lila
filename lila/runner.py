@@ -187,7 +187,6 @@ class TestCase:
         run_id: str,
         server_url: str,
         report_logs: List[ReportLog],
-        dry_run: bool = False,
     ) -> None:
         state = await context.get_state()
         dumped_state = dump_browser_state(state)
@@ -239,7 +238,6 @@ class TestCase:
         context: BrowserContext,
         server_url: str,
         report_logs: List[ReportLog],
-        dry_run: bool = False,
     ) -> None:
         done = False
 
@@ -453,7 +451,6 @@ class TestCase:
         run_id: str,
         server_url: str,
         report_logs: List[ReportLog],
-        dry_run: bool = False,
     ) -> None:
         thread_id = str(uuid.uuid4())
         logger.debug(f"Initializing thread {thread_id} to handle step")
@@ -514,7 +511,6 @@ class TestCase:
                 context,
                 server_url,
                 report_logs,
-                dry_run,
             )
 
         if verifications:
@@ -530,13 +526,12 @@ class TestCase:
                     run_id,
                     server_url,
                     report_logs,
-                    dry_run,
                 )
                 logger.debug(f"Verification passed for {verification}")
         else:
             logger.info("No verifications for this step")
 
-    def start(self, server_url: str, batch_id: str) -> str:
+    def start(self, server_url: str) -> str:
         ret = requests.post(
             f"{server_url}/api/v1/remote/runs",
             headers={
@@ -547,7 +542,6 @@ class TestCase:
             json={
                 "name": self.name,
                 "content": self.raw_content,
-                "batch_id": batch_id,
             },
         )
         ret.raise_for_status()
@@ -606,13 +600,10 @@ class TestCase:
         config: Config,
         browser_state: Optional[str],
         name: str,
-        dry_run: bool = False,
     ) -> bool:
         with logger.contextualize(test_name=name):
             server_url = config.runtime.server_url
-            report_test_status(
-                run_id, {"status": "running" if not dry_run else "dry-run"}, server_url
-            )
+            report_test_status(run_id, {"status": "running"}, server_url)
             logger.debug(f"Test {run_id} started running")
 
             context = self.initialize_browser_context(config, browser_state)
@@ -642,7 +633,6 @@ class TestCase:
                             run_id,
                             server_url,
                             report[idx],
-                            dry_run=dry_run,
                         )
                         logger.success("Step completed successfully")
                     except FailedStepError as e:
@@ -654,15 +644,14 @@ class TestCase:
                         await self.teardown(context, name, config)
                         raise
 
-            if not dry_run:
-                report_test_status(
-                    run_id,
-                    {
-                        "status": "finished",
-                        "conclusion": "success" if success else "failure",
-                    },
-                    server_url,
-                )
+            report_test_status(
+                run_id,
+                {
+                    "status": "finished",
+                    "conclusion": "success" if success else "failure",
+                },
+                server_url,
+            )
 
             await self.teardown(context, name, config)
             self.dump_report(config.runtime.output_dir, report)
@@ -698,7 +687,9 @@ class TestRunner:
         self.testcases = testcases
 
     def run_tests(
-        self, config: Config, browser_state: Optional[str], batch_id: str, dry_run: bool
+        self,
+        config: Config,
+        browser_state: Optional[str],
     ) -> bool:
         future_to_test = {}
 
@@ -707,7 +698,7 @@ class TestRunner:
         ) as executor:
             for idx, testcase in enumerate(self.testcases):
                 with logger.contextualize(test_name=testcase.name):
-                    run_id = testcase.start(config.runtime.server_url, batch_id)
+                    run_id = testcase.start(config.runtime.server_url)
 
                     # For debuggin purposes
                     def run_wrapper(*args, **kwargs):
@@ -724,7 +715,6 @@ class TestRunner:
                         config,
                         browser_state,
                         name=testcase.name,
-                        dry_run=True,
                     )
                     future_to_test[key] = testcase
 
