@@ -1,32 +1,33 @@
 [<img src="assets/logo.png" width=300>](https://lila.dev/)
 
+<h1>The best testing framework for startups 🚀</h1>
+
 [![PyPI - Version](https://img.shields.io/pypi/v/lilacli?color=blue)](https://pypi.org/project/lilacli/)
-[![Documentation Status](https://readthedocs.org/projects/lila/badge/?version=latest)](https://docs.lila.dev)
+[![Documentation](https://img.shields.io/badge/Documentation-📕-blue)](https://docs.lila.dev)
 [![CI](https://github.com/lila-team/lila/actions/workflows/daily-run.yml/badge.svg)](https://github.com/lila-team/lila/actions/workflows/daily-run.yml)
 [![Twitter](https://img.shields.io/twitter/follow/lila__dev?style=social)](https://twitter.com/lila__dev)
 [![Discord](https://img.shields.io/discord/1303067047931936809?label=Discord)](https://discord.gg/kZ7TEmxH)
 ![GitHub Repo stars](https://img.shields.io/github/stars/lila-team/lila)
 
-**[Lila](https://lila.dev) is the best testing framework for fast moving teams developing webapps.**
-
 Lila CLI is a powerful tool for running end-to-end tests written in human-readable plain text using YAML files. It simplifies the testing process by allowing anyone in the team to write tests in a natural, easy-to-understand format.
 
 **No coding required.**
 
+## Quick start
 
-### How does it work?
+With pip (Python>=3.11)
 
-Lila runs your app in a **local browser** with [Playwright](https://playwright.dev/python/) and uses an LLM-powered engine to guide the CLI run the high level instructions.
+```
+pip install lilacli
+```
 
-### Why Lila?
+Install Playwright Chromium web drivers
 
-* No coding required.
-* Self healing tests, does not rely on low level implementation.
-* Anyone in the team can implement tests.
-* Integrates natively with Playwright storage states.
-* Runs browser locally, making it ideal for localdev or staging environments.
+```
+playwright install chromium
+```
 
-### Test example
+Create your first testcase in a `demo.yaml` file
 
 ```yaml
 steps:
@@ -39,49 +40,159 @@ steps:
     verify: the map shows the Empire State Building in NY
 ```
 
+Fetch an API Key from [Lila app](https://app.lila.dev) and add it to an `.env` file:
+
+```
+LILA_API_KEY=...
+```
+
+Run
+
+```
+lila run demo.yaml
+```
+
+## How does it work?
+
+Lila runs your app in a **local browser** with [Playwright](https://playwright.dev/python/) and uses an LLM-powered engine to guide the CLI run high level instructions. Lila extracts information from the DOM using the awesome library [browser-use](https://github.com/browser-use/browser-use)
+
+### Why Lila?
+
+* No coding required.
+* Self healing tests, does not rely on low level implementation.
+* Anyone in the team can implement tests.
+* Integrates natively with Playwright storage states.
+* Runs browser locally, making it ideal for localdev or staging environments.
+
+### Writing tests
+
+Tests are just YAML files. Here is the same example as the quick start.
+
+```yaml
+steps:
+  - goto: https://www.google.com/maps
+
+  - input: Empire State on the main search bar
+    verify: a dropdown with suggestions appears
+
+  - click: on the first suggestion from the dropdown
+    verify: the map shows the Empire State Building in NY
+```
+
+### Step types
+
+**goto**: navigate to a URL
+
+```yaml
+- goto: https://private.staging.my-app.com
+```
+
+**click**: perform a click on a described element
+
+```yaml
+- click: on the checkout cart
+# or
+- click: on the direction item
+# or
+- click: on button 'Create'
+```
+
+**input**: type text into an input field
+
+```yaml
+- input: foo@bar.com as email
+# or
+- input: iPad mini in the main search bar
+```
+
+**submit**: submits a form by clicking a button or pressing enter
+
+```yaml
+- submit: the login form
+# or
+- submit: the search
+```
+
+**wait**: just waits N seconds
+
+```yaml
+- wait: 10  # waits 10 seconds
+```
+
+**pick**: pick an element from a dropdown
+
+```yaml
+- pick: EST from the timezone dropdown
+```
+
+**exec**: run a bash command
+
+```yaml
+- exec: |  # multiline
+    curl -X POST ...
+
+# or
+- exec: psql -c "INSERT ..." # single line
+```
+
+### Verifications
+
+Each step can have one or more `verify` assertions.
+
+```yaml
+- goto: https://my-app.com/login
+  verify: there is a login form with username and password  # Single verification
+
+- click: the checkout cart
+  verify:  # multi verifications
+    - 5 items appear in the purchase summary
+    - the total is 500 USD
+```
+
+### More on building tests
+
 For more information on how to build tests, [checkout the guides](https://docs.lila.dev/guides/intro)
+
+### More examples
 
 For test examples, Lila runs daily a suite of tests over public URLs. Check them out [here](https://github.com/lila-team/examples)
 
-## Getting started
+## Creating an account
 
-### Create a free account
+Lila is free for beta users. Create your free account at [https://lila.dev](https://lila.dev).
+You will need the account to fetch an API key to run lila CLI.
 
-You will need a free account to try Lila. Create your free account at [https://lila.dev](https://lila.dev)
 
-### Installation
+## Reusing state
 
-Lila CLI requires Python 3.11 or higher. Install it using pip:
+Lila runs save the browser state in the output folder. To re-use where another test left off, just pass `--browser-state` parameter.
 
-```bash
-pip install lilacli
+For example:
+
+**login.yaml**:
+
+```yaml
+steps:
+  - goto: https://my-app.com/login
+  - input: foobar as username
+  - input: barbaz as password
+  - submit: the login form
+    verify: login was successful
 ```
 
-Install Chromium web drivers for Playwright
+`lila run login.yaml` -> This will generate `lila-output/login.json`
 
-```bash
-playwright install chromium
+**dashboard.yaml** (needs a logged in user)
+
+```yaml
+steps:
+  - goto: https://my-app.com/dashboard
+    verify: there is a panel displaying metrics
 ```
 
-### Quick Start
+`lila run dashboard.yaml --browser-state lila-output/login.json`
 
-Initialize a new Lila test project:
-
-```bash
-lila init
-```
-
-This command creates a template structure with example tests to help you get started.
-
-### Running Tests
-
-Fetch your `LILA_API_KEY` from the [app](https://app.lila.dev) and run your tests using the `run` command:
-
-```bash
-LILA_API_KEY=<your-api-key> lila run <folder/file>
-```
-
-#### Command Line Options
+## CLI Parameters
 
 * `--browser-state`: Initialize the browser with a Playwright JSON storage session
 * `--tags`: Filter tests by specified comma-separated tags
@@ -91,35 +202,9 @@ LILA_API_KEY=<your-api-key> lila run <folder/file>
 * `--headless`: If present, does not open browser
 * `--debug`: Displays debug logs
 
-#### Example runs
+## CI/CD ready
 
-```bash
-lila run tests/
-lila run tests/one-specific-test.yaml
-lila run tests/ --tags foo,bar
-lila run tests/subtests --exclude-tags baz
-lila run tests/user-login.yaml
-lila run tests/user.yaml --browser-state tests/user-login.json
-```
-
-### Configuring Lila
-
-Configuration can be set in `lila.toml` file. For the full spec, [checkout the documentation](https://docs.lila.dev/docs/guides/configuration)
-
-Configuration example
-
-```toml
-[browser]
-type = "chromium"
-width = 1536
-height = 1152
-
-[runtime]
-fail_fast = true
-output_dir = "lila-output"
-concurrent_workers = 4
-server_url = 'https://app.lila.dev'
-```
+Checkout [an example for a daily run using GHA](.github/workflows/daily-run.yaml)
 
 ## Documentation
 
