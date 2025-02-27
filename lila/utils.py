@@ -96,10 +96,8 @@ def replace_placeholders_with_values(content: str, mapping: Dict[str, str]) -> s
     return content
 
 
-def dump_browser_state(
-    state: BrowserState, prev_interaction: Optional[Dict] = None
-) -> Dict:
-    ret = {
+def dump_browser_state(state: BrowserState) -> Dict:
+    return {
         "dom": state.element_tree.clickable_elements_to_string(
             include_attributes=INCLUDE_ATTRIBUTES
         ),
@@ -109,40 +107,35 @@ def dump_browser_state(
         "pixels_above": state.pixels_above,
         "pixels_below": state.pixels_below,
     }
-    if prev_interaction:
-        ret["prev_interaction"] = prev_interaction
-
-    return ret
 
 
-def send_state(
-    idx: int,
+def generate_completion(
     run_id: str,
+    thread_id: str,
     server_url: str,
     state: BrowserState,
+    step_type: str,
+    step_content: str,
     prev_interaction: Optional[Dict] = None,
-) -> None:
-    dumped_state = dump_browser_state(state, prev_interaction)
+) -> Dict:
+    dumped_state = dump_browser_state(state)
+    data = {
+        "step_type": step_type,
+        "step_content": step_content,
+        "state": dumped_state,
+    }
+
+    if prev_interaction:
+        data["prev_interaction"] = prev_interaction
+
     ret = requests.post(
-        f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/states",
+        f"{server_url}/api/v1/remote/runs/{run_id}/threads/{thread_id}/completion",
         headers={
             "Content-Type": "application/json",
             "Accept": "application/json",
             "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
         },
-        json=dumped_state,
-    )
-    ret.raise_for_status()
-
-
-def get_completion(idx: int, run_id: str, server_url: str) -> Dict:
-    ret = requests.get(
-        f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/completion",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
-        },
+        json=data,
     )
     ret.raise_for_status()
     return ret.json()

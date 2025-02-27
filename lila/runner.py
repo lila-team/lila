@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import traceback
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -26,12 +27,10 @@ from lila.const import MAX_ATTEMPTS, MAX_LOGS_DISPLAY
 from lila.utils import (
     PressKeyWithFocus,
     dump_browser_state,
-    get_completion,
+    generate_completion,
     press_key,
-    pretty_step_formatter,
     render_template_to_file,
     run_command,
-    send_state,
 )
 
 
@@ -178,9 +177,11 @@ class TestCase:
         self.status = data.get("conclusion", data["run_status"])
         logger.debug("Updated update queue for new state to render")
 
-    async def handle_verifications(
+    async def handle_verification(
         self,
-        idx: int,
+        thread_id: str,
+        verification: str,
+        step_type: str,
         step_content: str,
         context: BrowserContext,
         run_id: str,
@@ -191,57 +192,59 @@ class TestCase:
         state = await context.get_state()
         dumped_state = dump_browser_state(state)
         ret = requests.post(
-            f"{server_url}/api/v1/remote/runs/{run_id}/steps/{idx}/verifications",
+            f"{server_url}/api/v1/remote/runs/{run_id}/threads/{thread_id}/verifications",
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/json",
                 "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
             },
-            json=dumped_state,
+            json={
+                "verification": verification,
+                "state": dumped_state,
+                "step_type": step_type,
+                "step_content": step_content,
+            },
         )
         ret.raise_for_status()
         logger.debug(
-            f"Successfully sent browser state for verification for step {idx } run {run_id}"
+            f"Successfully sent browser state for verification for thread {thread_id} run {run_id}"
         )
 
-        data = ret.json()
-
-        if not data["verifications"]:
-            logger.debug(f"No verifications found for step {idx}")
-            return
-
-        for verification in data["verifications"]:
-            if verification["status"] == "failure":
-                logger.debug(
-                    f"Verification failed for step {pretty_step_formatter(self.steps[idx])}: {verification['log']}"
-                )
-                report_logs.append(
-                    ReportLog(
-                        log=f"Verification failed: {verification['log']}",
-                        screenshot_b64=await context.take_screenshot(),
-                    )
-                )
-                raise FailedStepError(f"Failed to execute step: {verification['log']}")
-
-            logger.debug(f"Verification passed for step {idx}: {verification['log']}")
+        result = ret.json()["result"]
+        if result["status"] == "failure":
+            logger.debug(f"Verification failed '{verification}': {result['log']}")
             report_logs.append(
                 ReportLog(
-                    log=f"Verification passed: {verification['log']}",
+                    log=f"Verification failed: {result['log']}",
                     screenshot_b64=await context.take_screenshot(),
                 )
             )
+            raise FailedStepError(f"Failed to execute step: {result['log']}")
+
+        logger.debug(f"Verification passed for '{verification}': {result['log']}")
+        logger.info(f"Verification passed: {result['log']}")
+        report_logs.append(
+            ReportLog(
+                log=f"Verification passed: {result['log']}",
+                screenshot_b64=await context.take_screenshot(),
+            )
+        )
 
     async def _handle_complex_step(
         self,
-        idx: int,
-        context: BrowserContext,
         run_id: str,
+        thread_id: str,
+        step_type: str,
+        step_content: str,
+        context: BrowserContext,
         server_url: str,
         report_logs: List[ReportLog],
         dry_run: bool = False,
     ) -> None:
         done = False
+
         prev_interaction = None
+
         scrolling = False
         attempts = 0
         while not done:
@@ -251,10 +254,16 @@ class TestCase:
                 raise FailedStepError("Step took too long to complete")
 
             state = await context.get_state()
-            send_state(idx, run_id, server_url, state, prev_interaction)
-            logger.debug(f"Sent state for step {idx}")
 
-            data = get_completion(idx, run_id, server_url)["completion"]
+            data = generate_completion(
+                run_id,
+                thread_id,
+                server_url,
+                state,
+                step_type,
+                step_content,
+                prev_interaction,
+            )["completion"]
 
             report_logs.append(
                 ReportLog(
@@ -263,7 +272,7 @@ class TestCase:
                 )
             )
 
-            logger.debug(f"Got completion data for step {idx}")
+            logger.debug(f"Got completion data for step {step_type} {step_content}")
 
             logger.info(data["log"])
             if "action" in data:
@@ -437,7 +446,6 @@ class TestCase:
 
     async def handle_step(
         self,
-        idx: int,
         step_type: str,
         step_content: str,
         verifications: List[str],
@@ -447,6 +455,9 @@ class TestCase:
         report_logs: List[ReportLog],
         dry_run: bool = False,
     ) -> None:
+        thread_id = str(uuid.uuid4())
+        logger.debug(f"Initializing thread {thread_id} to handle step")
+
         page = await context.get_current_page()
         if step_type == "goto":
             await page.goto(step_content)
@@ -496,15 +507,32 @@ class TestCase:
             )
         else:
             await self._handle_complex_step(
-                idx, context, run_id, server_url, report_logs, dry_run
+                run_id,
+                thread_id,
+                step_type,
+                step_content,
+                context,
+                server_url,
+                report_logs,
+                dry_run,
             )
 
         if verifications:
-            logger.info("Running step verifications")
-            await self.handle_verifications(
-                idx, step_content, context, run_id, server_url, report_logs, dry_run
-            )
-            logger.debug("Verifications completed successfully")
+            logger.debug(f"Running step verifications: {len(verifications)}")
+            for verification in verifications:
+                logger.debug(f"Running verification: {verification}")
+                await self.handle_verification(
+                    thread_id,
+                    verification,
+                    step_type,
+                    step_content,
+                    context,
+                    run_id,
+                    server_url,
+                    report_logs,
+                    dry_run,
+                )
+                logger.debug(f"Verification passed for {verification}")
         else:
             logger.info("No verifications for this step")
 
@@ -607,7 +635,6 @@ class TestCase:
                     )
                     try:
                         await self.handle_step(
-                            idx,
                             step_type,
                             step_content,
                             verifications_list,
