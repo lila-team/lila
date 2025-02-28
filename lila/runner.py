@@ -30,6 +30,7 @@ from lila.utils import (
     generate_completion,
     press_key,
     render_template_to_file,
+    replace_vars_in_content,
     run_command,
 )
 
@@ -152,10 +153,10 @@ class TestCase:
                 "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
             },
             json={
-                "verification": verification,
+                "verification": replace_vars_in_content(verification),
                 "state": dumped_state,
                 "step_type": step_type,
-                "step_content": step_content,
+                "step_content": replace_vars_in_content(step_content),
             },
         )
         ret.raise_for_status()
@@ -216,7 +217,7 @@ class TestCase:
                 server_url,
                 state,
                 step_type,
-                step_content,
+                replace_vars_in_content(step_content),
                 prev_interaction,
             )["completion"]
 
@@ -414,7 +415,7 @@ class TestCase:
 
         page = await context.get_current_page()
         if step_type == "goto":
-            await page.goto(step_content)
+            await page.goto(replace_vars_in_content(step_content))
             await context._wait_for_page_and_frames_load()
             logger.info("Navigation completed successfully")
             report_logs.append(
@@ -424,7 +425,7 @@ class TestCase:
                 )
             )
         elif step_type == "wait":
-            seconds = int(step_content)
+            seconds = int(replace_vars_in_content(step_content))
             logger.info(f"Waiting for {step_content} seconds")
             await page.wait_for_timeout(seconds * 1000)
             logger.info("Wait completed successfully")
@@ -435,7 +436,7 @@ class TestCase:
                 )
             )
         elif step_type == "exec":
-            cmds = step_content.split("\n")
+            cmds = replace_vars_in_content(step_content).split("\n")
             for cmd in cmds:
                 if cmd:
                     logger.info(f"Executing command: {cmd}")

@@ -14,12 +14,13 @@ from loguru import logger
 from lila.config import Config
 from lila.const import BASE_URL
 from lila.runner import TestRunner, collect_test_cases
-from lila.utils import parse_tags, setup_logging
+from lila.utils import get_missing_vars, get_vars, parse_tags, setup_logging
 
 
 def validate_content(content: str, server_url: str) -> None:
     try:
         yaml.safe_load(content)
+        logger.debug("Content is a valid YAML")
     except yaml.YAMLError as e:
         raise ValueError(f"Provided content is not a valid YAML: {e}")
 
@@ -35,12 +36,19 @@ def validate_content(content: str, server_url: str) -> None:
     raise_for_status(ret)
     if ret.status_code == 200:
         data = ret.json()
-        if data["valid"]:
-            return
+        if not data["valid"]:
+            raise ValueError(
+                f"Provided content is not a valid Lila test case: {data['message']}"
+            )
+        else:
+            logger.debug("Content is a valid Lila test case")
 
-        raise ValueError(
-            f"Provided content is not a valid Lila test case: {data['message']}"
-        )
+    vars_list = get_vars(content)
+    logger.debug(f"Found variables: {vars}")
+
+    missing_vars = get_missing_vars(vars_list)
+    if missing_vars:
+        raise ValueError(f"Missing environment variables: {missing_vars}")
 
 
 def find_parsing_errors(test_paths: List[str], server_url: str) -> Dict[str, str]:

@@ -1,10 +1,10 @@
 import asyncio
+import copy
 import os
 import re
 import sys
-import uuid
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import requests
 from browser_use.agent.views import ActionResult
@@ -55,45 +55,17 @@ def get_missing_vars(vars_list: List[str]) -> List[str]:
     return ret
 
 
-def get_vars_from_env(
-    vars_list: List[str], fail_if_missing: bool = True
-) -> Dict[str, str]:
-    # Returns a dictionary with the values of the environment variables
-    # specified in vars_list
-    ret = {}
-    for var in vars_list:
-        if os.environ.get(var) is None:
-            if fail_if_missing:
-                raise RuntimeError(f"Environment variable {var} not found")
-        else:
-            ret[var] = os.environ[var]
+def replace_vars_in_content(content: str) -> str:
+    # Replaces all ${VAR_NAME} with the os env var value
+    ret = copy.deepcopy(content)
+    for var in get_vars(content):
+        value = os.environ.get(var)
+        if value is None:
+            raise RuntimeError(f"Environment variable {var} not found")
+
+        ret = ret.replace(f"${{{var}}}", value)
 
     return ret
-
-
-def replace_vars_with_placeholders(
-    content: str, vars_list: List[str]
-) -> Tuple[str, Dict]:
-    # Replaces all ${VAR_NAME} with placeholder_{idx}
-    mapping = {}
-    uuid_str = str(uuid.uuid4())[:4]
-    for idx, var in enumerate(set(vars_list)):
-        placeholder = f"placeholder_{uuid_str}"
-        content = content.replace(f"${{{var}}}", placeholder)
-        mapping[placeholder] = var
-
-    return content, mapping
-
-
-def replace_placeholders_with_values(content: str, mapping: Dict[str, str]) -> str:
-    # Replaces all placeholder_{idx} with the os env var value
-    for placeholder, value in mapping.items():
-        new_value = os.environ.get(value)
-        if new_value is None:
-            raise RuntimeError(f"Environment variable {value} not found")
-        content = content.replace(placeholder, new_value)
-
-    return content
 
 
 def dump_browser_state(state: BrowserState) -> Dict:
@@ -211,7 +183,12 @@ def setup_logging(debug: bool):
         if "test_name" in record["extra"]:
             MAX_STEP_LENGTH = 20
             if "step" in record["extra"]:
-                record["extra"]["step"] = record["extra"]["step"].replace("\n", " ")
+                record["extra"]["step"] = (
+                    record["extra"]["step"]
+                    .replace("\n", " ")
+                    .replace("{", "")
+                    .replace("}", "")
+                )
                 if len(record["extra"]["step"]) > MAX_STEP_LENGTH:
                     ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"][:MAX_STEP_LENGTH]}...]</cyan> '
                 else:
