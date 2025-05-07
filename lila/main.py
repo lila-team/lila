@@ -14,7 +14,13 @@ from loguru import logger
 from lila.config import Config
 from lila.const import BASE_URL
 from lila.runner import TestRunner, collect_test_cases
-from lila.utils import get_missing_vars, get_vars, parse_tags, setup_logging
+from lila.utils import (
+    get_langchain_chat_model,
+    get_missing_vars,
+    get_vars,
+    parse_tags,
+    setup_logging,
+)
 
 
 def validate_content(content: str, server_url: str) -> None:
@@ -23,25 +29,6 @@ def validate_content(content: str, server_url: str) -> None:
         logger.debug("Content is a valid YAML")
     except yaml.YAMLError as e:
         raise ValueError(f"Provided content is not a valid YAML: {e}")
-
-    ret = requests.post(
-        f"{server_url}/api/v1/testcase-validations",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
-        },
-        json={"content": content},
-    )
-    raise_for_status(ret)
-    if ret.status_code == 200:
-        data = ret.json()
-        if not data["valid"]:
-            raise ValueError(
-                f"Provided content is not a valid Lila test case: {data['message']}"
-            )
-        else:
-            logger.debug("Content is a valid Lila test case")
 
     vars_list = get_vars(content)
     logger.debug(f"Found variables: {vars}")
@@ -155,6 +142,18 @@ def _get_config(config_file: Optional[str]) -> Config:
     help="Run tests in headless mode",
     default=False,
 )
+@click.option(
+    "--model",
+    type=str,
+    help="The LLM model to use",
+    default="gpt-4o",
+)
+@click.option(
+    "--provider",
+    type=str,
+    help="The LLM provider to use",
+    default="openai",
+)
 def run(
     path: str,
     tags: str,
@@ -164,15 +163,13 @@ def run(
     output_dir: Optional[str],
     debug: bool = False,
     headless: bool = False,
+    model: str = "gpt-4o",
+    provider: str = "openai",
 ):
     """Run a Lila test suite."""
     setup_logging(debug=debug)
 
-    if "LILA_API_KEY" not in os.environ:
-        logger.error(
-            f"Please set the LILA_API_KEY environment variable. You can find it in the Lila app: {BASE_URL}"
-        )
-        return
+    llm = get_langchain_chat_model(model=model, provider=provider)
 
     try:
         config_obj = _get_config(config)
@@ -232,7 +229,7 @@ def run(
         return
 
     runner = TestRunner(testcases)
-    success = runner.run_tests(config_obj, browser_state)
+    success = runner.run_tests(config_obj, browser_state, llm)
     if not success:
         sys.exit(1)
 

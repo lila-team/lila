@@ -16,6 +16,8 @@ from browser_use.dom.views import (
     DOMElementNode,
 )
 from jinja2 import Template
+from langchain.chat_models import init_chat_model
+from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
 from lila.const import INCLUDE_ATTRIBUTES
@@ -259,3 +261,14 @@ async def run_command(command):
     # Get the return code
     return_code = process.returncode
     return stdout, stderr, return_code
+
+
+def get_langchain_chat_model(model: str, provider: str) -> BaseChatModel:
+    # TODO -> add additional kwargs
+    # to configure the model
+    model = init_chat_model(
+        model=model,
+        model_provider=provider,
+    )
+    logger.debug(f"Using model: {model}")
+    return model

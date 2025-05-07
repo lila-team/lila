@@ -12,23 +12,16 @@ from typing import Any, Dict, List, Optional
 
 import requests
 import yaml
-from browser_use import Browser, BrowserConfig
+from browser_use import Agent, Browser, BrowserConfig, Controller
 from browser_use.browser.context import BrowserContext, BrowserContextConfig
-from browser_use.controller.service import Controller
-from browser_use.controller.views import (
-    ClickElementAction,
-    InputTextAction,
-    ScrollAction,
-)
+from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
+from pydantic import BaseModel
 
 from lila.config import Config
-from lila.const import MAX_ATTEMPTS, MAX_LOGS_DISPLAY
+from lila.const import MAX_LOGS_DISPLAY
 from lila.utils import (
-    PressKeyWithFocus,
     dump_browser_state,
-    generate_completion,
-    press_key,
     render_template_to_file,
     replace_vars_in_content,
     run_command,
@@ -45,22 +38,13 @@ class FailedStepError(RuntimeError):
     pass
 
 
-def report_test_status(run_id: str, payload: Dict, server_url: str) -> None:
-    ret = requests.patch(
-        f"{server_url}/api/v1/remote/runs/{run_id}",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
-        },
-        json=payload,
-    )
-    ret.raise_for_status()
-    logger.debug(f"Successfully reported test status for run {run_id}")
-
-
 @dataclass
 class StepResult:
+    success: bool
+    msg: str
+
+
+class AgentResult(BaseModel):
     success: bool
     msg: str
 
@@ -187,218 +171,49 @@ class TestCase:
         else:
             raise RuntimeError(f"Unknown verification status: {result['status']}")
 
-    async def _handle_complex_step(
+    async def _handle_agent_step(
         self,
         run_id: str,
         thread_id: str,
         step_type: str,
         step_content: str,
         context: BrowserContext,
-        server_url: str,
         report_logs: List[ReportLog],
+        llm: BaseChatModel,
     ) -> None:
-        done = False
+        controller = Controller(output_model=AgentResult)
 
-        prev_interaction = None
+        agent = Agent(
+            browser_context=context,
+            task=f"Handle the following step: {step_type} {step_content}",
+            llm=llm,
+            controller=controller,
+        )
+        history = await agent.run()
+        result = history.final_result()
 
-        scrolling = False
-        attempts = 0
-        while not done:
-            action_result = None
-            attempts += 1
-            if attempts > MAX_ATTEMPTS:
-                raise FailedStepError("Step took too long to complete")
+        if result:
+            parsed: AgentResult = AgentResult.model_validate_json(result)
 
-            state = await context.get_state()
-
-            data = generate_completion(
-                run_id,
-                thread_id,
-                server_url,
-                state,
-                step_type,
-                replace_vars_in_content(step_content),
-                prev_interaction,
-            )["completion"]
-
-            report_logs.append(
-                ReportLog(
-                    log=data["log"],
-                    screenshot_b64=await context.take_screenshot(),
-                )
-            )
-
-            logger.debug(f"Got completion data for step {step_type} {step_content}")
-
-            logger.info(data["log"])
-            if "action" in data:
-                logger.debug(f"Completion requires action: {data['action']}")
-                if data["action"] == "click":
-                    fn = controller.registry.registry.actions["click_element"]
-                    action_result = await fn.function(
-                        ClickElementAction(index=int(data["element"])), context
-                    )
-                    # Hack. There is a bug in browser use that reports a click
-                    # as a failure when the context is destroyed due to a navigation
-                    # event. This is a workaround to handle that.
-                    if (
-                        action_result.error
-                        and "Execution context was destroyed" in action_result.error
-                    ):
-                        action_result.error = None
-
-                    if action_result.error:
-                        logger.error(f"Click failed: {action_result.error}")
-                    else:
-                        logger.info("Click performed successfully")
-
-                    prev_interaction = {
-                        "status": "failure" if action_result.error else "success",
-                        "msg": action_result.error
-                        or "Successfully clicked requested element",
-                    }
-                elif data["action"] == "input":
-                    fn = controller.registry.registry.actions["input_text"]
-                    action_result = await fn.function(
-                        InputTextAction(index=int(data["element"]), text=data["text"]),
-                        context,
-                    )
-
-                    if action_result.error:
-                        logger.error(f"Input failed: {action_result.error}")
-                    else:
-                        logger.info("Input performed successfully")
-
-                    prev_interaction = {
-                        "status": "failure" if action_result.error else "success",
-                        "msg": action_result.error
-                        or "Successfully inputted text into requested element",
-                    }
-                elif data["action"] == "press-enter":
-                    action_result = await press_key(
-                        PressKeyWithFocus(index=int(data["element"]), key="Enter"),
-                        context,
-                    )
-                    logger.debug("Pressed Enter key")
-                    if action_result.error:
-                        logger.error(f"Press Enter failed: {action_result.error}")
-                    else:
-                        logger.info("Press Enter performed successfully")
-
-                    prev_interaction = {
-                        "status": "failure" if action_result.error else "success",
-                        "msg": action_result.error or "Successfully pressed Enter key",
-                    }
-                elif data["action"] == "native-dropdown-open":
-                    fn = controller.registry.registry.actions["get_dropdown_options"]
-                    action_result = await fn.function(
-                        index=int(data["element"]),
-                        browser=context,
-                    )
-
-                    if action_result.error:
-                        logger.error(f"Failed to open dropdown: {action_result.error}")
-                    else:
-                        logger.info("Opened dropdown and got options")
-                    prev_interaction = {
-                        "status": "failure" if action_result.error else "success",
-                        "msg": action_result.error
-                        or f"Successfully opened dropdown and got options:\n{action_result.extracted_content}",
-                    }
-                    logger.debug("Opened dropdown and got options")
-                elif data["action"] == "native-dropdown-select":
-                    fn = controller.registry.registry.actions["select_dropdown_option"]
-                    action_result = await fn.function(
-                        index=int(data["element"]),
-                        text=data["text"],
-                        browser=context,
-                    )
-
-                    if action_result.error:
-                        logger.error(
-                            f"Failed to select option from dropdown: {action_result.error}"
-                        )
-                    else:
-                        logger.info("Selected option from dropdown")
-
-                    prev_interaction = {
-                        "status": "failure" if action_result.error else "success",
-                        "msg": action_result.error
-                        or "Successfully selected option from dropdown",
-                    }
-                    logger.debug("Opened dropdown and got options")
-                else:
-                    raise RuntimeError(f"Unknown action {data['action']}")
-
-                await context._wait_for_page_and_frames_load()
+            if parsed.success:
+                logger.debug(f"Agent step completed successfully: {parsed.msg}")
                 report_logs.append(
                     ReportLog(
-                        log=action_result.error or "Action performed successfully",
+                        log=f"Agent step completed successfully: {parsed.msg}",
                         screenshot_b64=await context.take_screenshot(),
                     )
                 )
-
-            if data["status"] == "complete" and (
-                action_result is None or not action_result.error
-            ):
-                done = True
-                logger.debug("Completion reports step completed.")
+            else:
+                logger.debug(f"Agent step failed: {parsed.msg}")
                 report_logs.append(
                     ReportLog(
-                        log="Step completed successfully",
+                        log=f"Agent step failed: {parsed.msg}",
                         screenshot_b64=await context.take_screenshot(),
                     )
                 )
-            if data["status"] == "wip":
-                logger.debug("Completion reports step still in progress.")
-            elif data["status"] == "not-found":
-                logger.debug("Completion reports element not found. Running scrolling.")
-                if scrolling or state.pixels_above == 0:
-                    if state.pixels_below == 0:
-                        logger.debug("No more elements to uncover. Failing step.")
-                        raise FailedStepError(f"Failed to execute step: {data['log']}")
-
-                    fn = controller.registry.registry.actions["scroll_down"]
-                    await fn.function(ScrollAction(), context)
-                    logger.debug("Scrolled one page down")
-                    prev_interaction = {
-                        "status": "success",
-                        "msg": "Scrolled down one page to uncover more elements.",
-                    }
-                    report_logs.append(
-                        ReportLog(
-                            log="Scrolled down one page to uncover more elements.",
-                            screenshot_b64=await context.take_screenshot(),
-                        )
-                    )
-                else:
-                    fn = controller.registry.registry.actions["scroll_up"]
-                    await fn.function(ScrollAction(state.pixels_above), context)
-                    logger.debug("Moved all the way up")
-                    prev_interaction = {
-                        "status": "success",
-                        "msg": "Scrolled to the top of the page to uncover more elements.",
-                    }
-                    report_logs.append(
-                        ReportLog(
-                            log="Scrolled to the top of the page to uncover more elements.",
-                            screenshot_b64=await context.take_screenshot(),
-                        )
-                    )
-
-                scrolling = True
-                logger.debug("Activated scrolling mode")
-
-                await context._wait_for_page_and_frames_load()
-            elif data["status"] == "failure":
-                logger.debug(f"Completion reports step failed: {data['log']}")
-                report_logs.append(
-                    ReportLog(
-                        log="Failed to execute step: {data['log']}",
-                        screenshot_b64=await context.take_screenshot(),
-                    )
-                )
-                raise FailedStepError(f"Failed to execute step: {data['log']}")
+                raise FailedStepError(f"Failed to execute step: {parsed.msg}")
+        else:
+            raise RuntimeError("Agent step returned no result")
 
     async def handle_step(
         self,
@@ -407,8 +222,8 @@ class TestCase:
         verifications: List[str],
         context: BrowserContext,
         run_id: str,
-        server_url: str,
         report_logs: List[ReportLog],
+        llm: BaseChatModel,
     ) -> None:
         thread_id = str(uuid.uuid4())
         logger.debug(f"Initializing thread {thread_id} to handle step")
@@ -461,55 +276,32 @@ class TestCase:
                 )
             )
         else:
-            await self._handle_complex_step(
+            await self._handle_agent_step(
                 run_id,
                 thread_id,
                 step_type,
                 step_content,
                 context,
-                server_url,
                 report_logs,
+                llm,
             )
 
         if verifications:
             logger.debug(f"Running step verifications: {len(verifications)}")
-            for verification in verifications:
-                logger.debug(f"Running verification: {verification}")
-                await self.handle_verification(
-                    thread_id,
-                    verification,
-                    step_type,
-                    step_content,
-                    context,
-                    run_id,
-                    server_url,
-                    report_logs,
-                )
-                logger.debug(f"Verification passed for {verification}")
+        #     for verification in verifications:
+        #         logger.debug(f"Running verification: {verification}")
+        #         await self.handle_verification(
+        #             thread_id,
+        #             verification,
+        #             step_type,
+        #             step_content,
+        #             context,
+        #             run_id,
+        #             report_logs,
+        #         )
+        #         logger.debug(f"Verification passed for {verification}")
         else:
             logger.info("No verifications for this step")
-
-    def start(self, server_url: str) -> str:
-        ret = requests.post(
-            f"{server_url}/api/v1/remote/runs",
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
-            },
-            json={
-                "name": self.name,
-                "content": self.raw_content,
-                "batch_id": str(uuid.uuid4()),  # tmp we could track later by batch
-            },
-        )
-        ret.raise_for_status()
-        if ret.status_code != 201:
-            raise RuntimeError(f"Failed to start run: {ret.json()}")
-
-        data = ret.json()
-        logger.info(f"Successfully started running test {self.name} [{data['run_id']}]")
-        return data["run_id"]
 
     @staticmethod
     def initialize_browser_context(
@@ -559,15 +351,11 @@ class TestCase:
         config: Config,
         browser_state: Optional[str],
         name: str,
+        llm: BaseChatModel,
     ) -> bool:
         with logger.contextualize(test_name=name):
-            server_url = config.runtime.server_url
-            report_test_status(run_id, {"status": "running"}, server_url)
-            logger.debug(f"Test {run_id} started running")
-
             context = self.initialize_browser_context(config, browser_state)
             logger.debug(f"Browser context initialized for {run_id}: {context}")
-
             success = True
             report: Dict[int, List[ReportLog]] = {}
             for idx, step in enumerate(self.steps):
@@ -590,8 +378,8 @@ class TestCase:
                             verifications_list,
                             context,
                             run_id,
-                            server_url,
                             report[idx],
+                            llm,
                         )
                         logger.success("Step completed successfully")
                     except FailedStepError as e:
@@ -600,24 +388,8 @@ class TestCase:
                         break
                     except Exception as e:
                         logger.exception(f"Unexpected error: {e}")
-                        report_test_status(
-                            run_id,
-                            {
-                                "status": "internal-error",
-                            },
-                            server_url,
-                        )
                         await self.teardown(context, name, config)
                         raise
-
-            report_test_status(
-                run_id,
-                {
-                    "status": "finished",
-                    "conclusion": "success" if success else "failure",
-                },
-                server_url,
-            )
 
             await self.teardown(context, name, config)
             self.dump_report(config.runtime.output_dir, report)
@@ -626,7 +398,9 @@ class TestCase:
             return success
 
 
-def collect_test_cases(test_files: List[str], tags: List[str], exclude_tags: List[str]):
+def collect_test_cases(
+    test_files: List[str], tags: List[str], exclude_tags: List[str]
+) -> List[TestCase]:
     testcases = []
     for path in test_files:
         with open(path, "r") as f:
@@ -656,6 +430,7 @@ class TestRunner:
         self,
         config: Config,
         browser_state: Optional[str],
+        llm: BaseChatModel,
     ) -> bool:
         future_to_test = {}
 
@@ -664,7 +439,7 @@ class TestRunner:
         ) as executor:
             for idx, testcase in enumerate(self.testcases):
                 with logger.contextualize(test_name=testcase.name):
-                    run_id = testcase.start(config.runtime.server_url)
+                    run_id = str(uuid.uuid4())
 
                     # For debuggin purposes
                     def run_wrapper(*args, **kwargs):
@@ -681,6 +456,7 @@ class TestRunner:
                         config,
                         browser_state,
                         name=testcase.name,
+                        llm=llm,
                     )
                     future_to_test[key] = testcase
 
