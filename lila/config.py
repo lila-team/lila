@@ -22,7 +22,6 @@ class Runtime:
     concurrent_workers: int
     fail_fast: bool
     output_dir: str
-    server_url: str = const.BASE_URL
 
     @classmethod
     def default(cls):
@@ -30,7 +29,6 @@ class Runtime:
             concurrent_workers=5,
             fail_fast=False,
             output_dir="lila-output",
-            server_url=const.BASE_URL,
         )
 
 

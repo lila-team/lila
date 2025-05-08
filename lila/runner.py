@@ -48,4 +48,11 @@ class TestRunner:
                 testcase_run = future.result()
                 results.append(testcase_run)
 
+                # If fail_fast is enabled and the test failed, stop executing remaining tests
+                if config.runtime.fail_fast and testcase_run.status == "failed":
+                    for f in list(future_to_test.keys()):
+                        if not f.done():
+                            f.cancel()
+                    break
+
         return results
