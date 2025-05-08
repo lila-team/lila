@@ -4,7 +4,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import requests
 from browser_use.agent.views import ActionResult
@@ -16,6 +16,8 @@ from browser_use.dom.views import (
     DOMElementNode,
 )
 from jinja2 import Template
+from langchain.chat_models import init_chat_model
+from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
 from lila.const import INCLUDE_ATTRIBUTES
@@ -182,19 +184,35 @@ def setup_logging(debug: bool):
 
         if "test_name" in record["extra"]:
             MAX_STEP_LENGTH = 20
+            test_name = record["extra"]["test_name"]
+
             if "step" in record["extra"]:
-                record["extra"]["step"] = (
+                step = (
                     record["extra"]["step"]
                     .replace("\n", " ")
                     .replace("{", "")
                     .replace("}", "")
                 )
-                if len(record["extra"]["step"]) > MAX_STEP_LENGTH:
-                    ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"][:MAX_STEP_LENGTH]}...]</cyan> '
-                else:
-                    ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"]}]</cyan> '
+                step_text = f"{step[:MAX_STEP_LENGTH]}{'...' if len(step) > MAX_STEP_LENGTH else ''}"
+
+                # Context formatting with action/verification flags
+                action_tag = " | ▶" if "action" in record["extra"] else ""
+
+                # Add verification flag and text if present
+                verification_tag = ""
+                if "verify" in record["extra"]:
+                    verification_tag = " | ✓"
+                    if "verification_text" in record["extra"]:
+                        v_text = record["extra"]["verification_text"]
+                        # Truncate verification text if too long
+                        MAX_VERIFY_LENGTH = 30
+                        v_text = v_text.replace("\n", " ")
+                        v_text = f"{v_text[:MAX_VERIFY_LENGTH]}{'...' if len(v_text) > MAX_VERIFY_LENGTH else ''}"
+                        verification_tag = f" | ✓ {v_text}"
+
+                ret += f"<cyan>[{test_name} | {step_text}{action_tag}{verification_tag}]</cyan> "
             else:
-                ret += f'<cyan>[{record["extra"]["test_name"]}]</cyan> '
+                ret += f"<cyan>[{test_name}]</cyan> "
 
         ret += f'<level>{record["message"]}</level>\n'
         return ret
@@ -259,3 +277,28 @@ async def run_command(command):
     # Get the return code
     return_code = process.returncode
     return stdout, stderr, return_code
+
+
+def get_langchain_chat_model(model: str, provider: str) -> BaseChatModel:
+    # TODO -> add additional kwargs
+    # to configure the model
+    model = init_chat_model(
+        model=model,
+        model_provider=provider,
+    )
+    logger.debug(f"Using model: {model}")
+    return model
+
+
+def fake_vars(content: str, fake_env_f: Callable[[str], str]) -> str:
+    # Searches for all ${VAR_NAME} and replaces them with the value of the environment variable VAR_NAME
+    regex = re.compile(r"\${(.*?)}")
+    for match in regex.findall(content):
+        logger.debug(f"Matched: {match}")
+        value = fake_env_f(match)
+        if value is None:
+            logger.warning(f"Mapping variable {match} not found")
+            continue
+        content = content.replace(f"${{{match}}}", value)
+
+    return content

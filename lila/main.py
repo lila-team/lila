@@ -1,78 +1,134 @@
-import json
+import base64
+import datetime
 import os
 import pathlib
 import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import click
 import requests
 import yaml
+from dacite import from_dict
+from jinja2 import Template
 from loguru import logger
 
 from lila.config import Config
 from lila.const import BASE_URL
-from lila.runner import TestRunner, collect_test_cases
-from lila.utils import get_missing_vars, get_vars, parse_tags, setup_logging
+from lila.models import TestCaseDef
+from lila.runner import TestRunner
+from lila.utils import (
+    get_langchain_chat_model,
+    get_missing_vars,
+    get_vars,
+    parse_tags,
+    setup_logging,
+)
 
 
-def validate_content(content: str, server_url: str) -> None:
-    try:
-        yaml.safe_load(content)
-        logger.debug("Content is a valid YAML")
-    except yaml.YAMLError as e:
-        raise ValueError(f"Provided content is not a valid YAML: {e}")
+@dataclass
+class TestCollection:
+    valid: Dict[str, TestCaseDef]
+    invalid: Dict[str, str]
 
-    ret = requests.post(
-        f"{server_url}/api/v1/testcase-validations",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
-        },
-        json={"content": content},
+
+def generate_html_report(test_results, output_dir: str) -> Tuple[str, float]:
+    """
+    Generate an HTML report for test results and save it to the output directory.
+
+    Args:
+        test_results: List of test results
+        output_dir: Directory to save the report
+
+    Returns:
+        Tuple of (report_path, total_duration)
+    """
+    # Make sure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Calculate summary metrics
+    total_tests = len(test_results)
+    passed_tests = sum(1 for result in test_results if result.status == "success")
+    failed_tests = total_tests - passed_tests
+    total_duration = sum(result.duration for result in test_results)
+
+    # Try to load the logo
+    logo_base64 = ""
+    logo_path = Path(__file__).parent / "assets" / "logo.png"
+    if logo_path.exists():
+        with open(logo_path, "rb") as f:
+            logo_base64 = base64.b64encode(f.read()).decode("utf-8")
+
+    # Load the template
+    template_path = Path(__file__).parent / "assets" / "test_results.html"
+    with open(template_path, "r") as f:
+        template_content = f.read()
+
+    # Create Jinja template
+    template = Template(template_content)
+
+    # Prepare timestamp
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Render the template
+    html_content = template.render(
+        test_results=test_results,
+        total_tests=total_tests,
+        passed_tests=passed_tests,
+        failed_tests=failed_tests,
+        total_duration=round(total_duration, 2),
+        timestamp=timestamp,
+        logo_base64=logo_base64,
+        enumerate=enumerate,
+        len=len,
     )
-    raise_for_status(ret)
-    if ret.status_code == 200:
-        data = ret.json()
-        if not data["valid"]:
-            raise ValueError(
-                f"Provided content is not a valid Lila test case: {data['message']}"
-            )
-        else:
-            logger.debug("Content is a valid Lila test case")
 
-    vars_list = get_vars(content)
-    logger.debug(f"Found variables: {vars}")
+    # Generate the report filename
+    report_filename = (
+        f"lila_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+    )
+    report_path = os.path.join(output_dir, report_filename)
 
-    missing_vars = get_missing_vars(vars_list)
-    if missing_vars:
-        raise ValueError(f"Missing environment variables: {missing_vars}")
+    # Write the report file
+    with open(report_path, "w") as f:
+        f.write(html_content)
+
+    return report_path, total_duration
 
 
-def find_parsing_errors(test_paths: List[str], server_url: str) -> Dict[str, str]:
+def parse_collection(test_paths: List[str]) -> TestCollection:
     invalid_tests = {}
+    valid_tests = {}
+
     for path in test_paths:
         with open(path, "r") as f:
             content = f.read()
-            try:
-                validate_content(content, server_url)
-            except ValueError as e:
-                invalid_tests[path] = str(e)
+            logger.debug(f"Read file: {path}")
 
-    return invalid_tests
+            vars_list = get_vars(content)
+            logger.debug(f"Found variables: {vars}")
 
+            missing_vars = get_missing_vars(vars_list)
+            if missing_vars:
+                logger.debug(f"Missing environment variables: {missing_vars}")
+                invalid_tests[path] = f"Missing environment variables: {missing_vars}"
+            else:
+                try:
+                    parsed = yaml.safe_load(content)
+                except yaml.YAMLError:
+                    invalid_tests[path] = "Provided content is not a valid YAML: {e}"
+                else:
+                    logger.debug("Content is a valid YAML")
+                    try:
+                        test = from_dict(data_class=TestCaseDef, data=parsed)
+                    except Exception as e:
+                        invalid_tests[path] = str(e)
+                    else:
+                        valid_tests[path] = test
 
-def raise_for_status(response: requests.Response):
-    try:
-        response.raise_for_status()
-    except requests.RequestException as e:
-        try:
-            data = response.json()
-            raise RuntimeError(f"Error: {data}") from e
-        except json.JSONDecodeError:
-            raise RuntimeError(f"Error: {response.text}") from e
+    return TestCollection(valid=valid_tests, invalid=invalid_tests)
 
 
 @click.group()
@@ -155,6 +211,18 @@ def _get_config(config_file: Optional[str]) -> Config:
     help="Run tests in headless mode",
     default=False,
 )
+@click.option(
+    "--model",
+    type=str,
+    help="The LLM model to use",
+    default="gpt-4o",
+)
+@click.option(
+    "--provider",
+    type=str,
+    help="The LLM provider to use",
+    default="openai",
+)
 def run(
     path: str,
     tags: str,
@@ -164,15 +232,13 @@ def run(
     output_dir: Optional[str],
     debug: bool = False,
     headless: bool = False,
+    model: str = "gpt-4o",
+    provider: str = "openai",
 ):
     """Run a Lila test suite."""
     setup_logging(debug=debug)
 
-    if "LILA_API_KEY" not in os.environ:
-        logger.error(
-            f"Please set the LILA_API_KEY environment variable. You can find it in the Lila app: {BASE_URL}"
-        )
-        return
+    llm = get_langchain_chat_model(model=model, provider=provider)
 
     try:
         config_obj = _get_config(config)
@@ -216,24 +282,90 @@ def run(
         logger.error(f"No YAML files found in the provided path: {path}")
         return
 
-    invalid_files = find_parsing_errors(test_files, config_obj.runtime.server_url)
-    if invalid_files:
+    test_collection = parse_collection(test_files)
+    if test_collection.invalid:
         logger.error("Parsing errors found")
-        for path, error in invalid_files.items():
+        for path, error in test_collection.invalid.items():
             logger.error(f"File {path}: {error}")
         return
 
-    testcases = collect_test_cases(test_files, tag_list, exclude_tag_list)
-
-    if not testcases:
+    if not test_collection.valid:
         logger.error(
             "No test cases found with the provided path and the provided params"
         )
         return
 
-    runner = TestRunner(testcases)
-    success = runner.run_tests(config_obj, browser_state)
-    if not success:
+    # Print test collection in a pytest-like format
+    test_count = len(test_collection.valid)
+    print(f"\nCollected {test_count} test{'s' if test_count != 1 else ''}")
+    print("=" * 70)
+    for i, (path, test_def) in enumerate(test_collection.valid.items(), 1):
+        # Extract file name from path for cleaner display
+        file_name = path.split("/")[-1]
+        # Show tags if present
+        tags_str = ""
+        if hasattr(test_def, "tags") and test_def.tags:
+            tags_str = f" [tags: {', '.join(test_def.tags)}]"
+        print(f"{i}) {file_name}{tags_str}")
+    print("=" * 70)
+
+    runner = TestRunner(test_collection.valid)
+    test_results = runner.run_tests(config_obj, browser_state, llm)
+
+    # Print test results summary
+    total_tests = len(test_results)
+    passed_tests = sum(1 for result in test_results if result.status == "success")
+    failed_tests = total_tests - passed_tests
+
+    print("\n" + "=" * 70)
+    print(f"TEST RESULTS SUMMARY: {passed_tests}/{total_tests} passed")
+    print("=" * 70)
+
+    # Print detailed results for each test
+    for result in test_results:
+        test_status = "✅ PASSED" if result.status == "success" else "❌ FAILED"
+        duration = f"{result.duration:.2f}s"
+        print(f"\n{test_status} {result.path} ({duration})")
+
+        if result.status == "failed":
+            # Find the failed step
+            for i, step_result in enumerate(result.steps_results):
+                if not step_result.action.success:
+                    step_type = result.test_def.steps[i].get_type()
+                    step_value = result.test_def.steps[i].get_value()
+                    print(f"  Failed at step {i+1}: {step_type} {step_value}")
+                    print(f"  Reason: {step_result.action.reason}")
+                    break
+                elif step_result.verifications and any(
+                    not v.passed for v in step_result.verifications
+                ):
+                    step_type = result.test_def.steps[i].get_type()
+                    step_value = result.test_def.steps[i].get_value()
+                    print(f"  Failed at step {i+1}: {step_type} {step_value}")
+                    for j, v in enumerate(step_result.verifications):
+                        if not v.passed:
+                            print(f"  Verification {j+1} failed: {v.reason}")
+                    break
+
+    # Generate HTML report
+    output_dir = config_obj.runtime.output_dir
+    report_path, total_duration = generate_html_report(test_results, output_dir)
+
+    # Convert to absolute path if needed
+    if not os.path.isabs(report_path):
+        report_path = os.path.abspath(report_path)
+
+    # Get a file:// URL for the report
+    report_url = f"file://{report_path}"
+
+    print("\n" + "=" * 70)
+    print(f"📊 DETAILED HTML REPORT: {report_path}")
+    print(f"📈 Open in browser: {report_url}")
+    print(f"⏱️ Total test duration: {total_duration:.2f}s")
+    print("=" * 70)
+
+    print("\n")
+    if failed_tests > 0:
         sys.exit(1)
 
 

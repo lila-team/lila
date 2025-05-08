@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lila Test Results</title>
+    <style>
+        :root {
+            --primary-color: #4a7bab;
+            --success-color: #4caf50;
+            --error-color: #f44336;
+            --warning-color: #ff9800;
+            --bg-color: #f5f7fa;
+            --card-bg: #ffffff;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            background-color: var(--bg-color);
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .report-header {
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 25px;
+            margin-bottom: 30px;
+            text-align: center;
+            position: relative;
+        }
+
+        .logo {
+            max-width: 150px;
+            margin-bottom: 15px;
+        }
+
+        .summary-cards {
+            display: flex;
+            justify-content: space-between;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .summary-card {
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            flex: 1;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .summary-card.success {
+            border-top: 4px solid var(--success-color);
+        }
+
+        .summary-card.error {
+            border-top: 4px solid var(--error-color);
+        }
+
+        .summary-card.total {
+            border-top: 4px solid var(--primary-color);
+        }
+
+        .summary-card.duration {
+            border-top: 4px solid var(--warning-color);
+        }
+
+        .summary-number {
+            font-size: 2.5em;
+            font-weight: bold;
+            margin: 10px 0;
+            color: #444;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background-color: #e0e0e0;
+            border-radius: 4px;
+            margin: 15px 0;
+            overflow: hidden;
+        }
+
+        .progress-value {
+            height: 100%;
+            background-color: var(--success-color);
+            border-radius: 4px;
+        }
+
+        .test-list {
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+            margin-bottom: 30px;
+        }
+
+        .test-list-header {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 15px 20px;
+            font-weight: bold;
+            display: grid;
+            grid-template-columns: 50px 1fr 120px 120px;
+            gap: 10px;
+        }
+
+        .test-item {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            display: grid;
+            grid-template-columns: 50px 1fr 120px 120px;
+            gap: 10px;
+            align-items: center;
+            transition: background-color 0.2s;
+        }
+
+        .test-item:last-child {
+            border-bottom: none;
+        }
+
+        .test-item:hover {
+            background-color: #f9f9f9;
+        }
+
+        .test-status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .status-success {
+            background-color: rgba(76, 175, 80, 0.15);
+            color: var(--success-color);
+        }
+
+        .status-failed {
+            background-color: rgba(244, 67, 54, 0.15);
+            color: var(--error-color);
+        }
+
+        .test-details {
+            display: none;
+            padding: 0 20px 20px 20px;
+            background-color: #f9f9f9;
+            border-bottom: 1px solid #eee;
+        }
+
+        .test-details-content {
+            background-color: var(--card-bg);
+            border-radius: 4px;
+            padding: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .test-details h4 {
+            margin-top: 15px;
+            margin-bottom: 10px;
+            color: #555;
+        }
+
+        .show-details {
+            cursor: pointer;
+        }
+
+        .timestamp {
+            text-align: right;
+            color: #777;
+            font-size: 0.9em;
+            margin-top: 20px;
+        }
+
+        .tag {
+            display: inline-block;
+            background-color: rgba(74, 123, 171, 0.1);
+            color: var(--primary-color);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+
+        .test-filename {
+            font-weight: 500;
+        }
+
+        .failure-details {
+            border-left: 3px solid var(--error-color);
+            padding-left: 15px;
+            margin: 15px 0;
+        }
+
+        .verify-failed {
+            color: var(--error-color);
+            font-weight: bold;
+        }
+
+        .step-failed {
+            color: var(--error-color);
+            font-weight: bold;
+        }
+
+        .test-tags {
+            margin-top: 8px;
+        }
+
+        .toggle-details {
+            cursor: pointer;
+            color: var(--primary-color);
+            display: inline-flex;
+            align-items: center;
+            font-size: 0.9em;
+        }
+
+        .toggle-details:hover {
+            text-decoration: underline;
+        }
+
+        /* New styles for step results */
+        .step-result-details {
+            margin: 10px 0 10px 0;
+            padding: 10px;
+            background-color: #f5f7fa;
+            border-radius: 4px;
+            border-left: 3px solid var(--primary-color);
+        }
+
+        .step-result {
+            margin-bottom: 5px;
+        }
+
+        .step-reason {
+            margin-bottom: 10px;
+            font-size: 0.95em;
+        }
+
+        .step-screenshot {
+            margin: 15px 0;
+        }
+
+        .step-screenshot h5 {
+            margin-bottom: 8px;
+            color: #555;
+        }
+
+        .step-screenshot-img {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .step-verifications {
+            margin: 15px 0 5px 0;
+        }
+
+        .step-verifications h5 {
+            margin-bottom: 8px;
+            color: #555;
+        }
+
+        .step-verifications ul {
+            list-style-type: none;
+            padding-left: 0;
+        }
+
+        .verification {
+            padding: 6px 10px;
+            margin-bottom: 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .verification-passed {
+            background-color: rgba(76, 175, 80, 0.15);
+            color: var(--success-color);
+        }
+
+        .verification-failed {
+            background-color: rgba(244, 67, 54, 0.15);
+            color: var(--error-color);
+        }
+
+        .success {
+            color: var(--success-color);
+            font-weight: 500;
+        }
+
+        .error {
+            color: var(--error-color);
+            font-weight: 500;
+        }
+
+        @media (max-width: 768px) {
+            .summary-cards {
+                flex-direction: column;
+            }
+
+            .test-list-header, .test-item {
+                grid-template-columns: 40px 1fr 90px;
+            }
+
+            .test-duration {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="report-header">
+        <img src="data:image/png;base64,{{ logo_base64 }}" alt="Lila Logo" class="logo">
+        <h1>Lila Test Results</h1>
+        <p>Test run completed on {{ timestamp }}</p>
+    </div>
+
+    <div class="summary-cards">
+        <div class="summary-card total">
+            <h3>Total Tests</h3>
+            <div class="summary-number">{{ total_tests }}</div>
+        </div>
+
+        <div class="summary-card success">
+            <h3>Passed</h3>
+            <div class="summary-number">{{ passed_tests }}</div>
+            <div class="progress-bar">
+                <div class="progress-value" style="width: {{ (passed_tests / total_tests) * 100 }}%"></div>
+            </div>
+        </div>
+
+        <div class="summary-card error">
+            <h3>Failed</h3>
+            <div class="summary-number">{{ failed_tests }}</div>
+        </div>
+
+        <div class="summary-card duration">
+            <h3>Total Duration</h3>
+            <div class="summary-number">{{ total_duration }}s</div>
+        </div>
+    </div>
+
+    <div class="test-list">
+        <div class="test-list-header">
+            <div>#</div>
+            <div>Test</div>
+            <div>Status</div>
+            <div>Duration</div>
+        </div>
+
+        {% for result in test_results %}
+        <div class="test-item">
+            <div>{{ loop.index }}</div>
+            <div>
+                <div class="test-filename">{{ result.path.split('/')[-1] }}</div>
+                {% if result.test_def.tags %}
+                <div class="test-tags">
+                    {% for tag in result.test_def.tags %}
+                    <span class="tag">{{ tag }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                <div class="toggle-details" onclick="toggleDetails('test-{{ loop.index }}')">
+                    {% if result.status == 'failed' %}Show failure details{% else %}Show details{% endif %}
+                </div>
+            </div>
+            <div>
+                <span class="test-status {% if result.status == 'success' %}status-success{% else %}status-failed{% endif %}">
+                    {% if result.status == 'success' %}PASSED{% else %}FAILED{% endif %}
+                </span>
+            </div>
+            <div>{{ "%.2f"|format(result.duration) }}s</div>
+        </div>
+
+        <div id="test-{{ loop.index }}" class="test-details">
+            <div class="test-details-content">
+                <h4>Test Steps</h4>
+                <ol>
+                    {% for i, step in enumerate(result.test_def.steps) %}
+                    <li>
+                        {{ step.get_type() }} {{ step.get_value() }}
+
+                        {% set step_results = result.steps_results %}
+                        {% if i < len(step_results) %}
+                            <!-- Step Result Information -->
+                            <div class="step-result-details">
+                                {% if step_results[i].action %}
+                                    <div class="step-result">
+                                        <strong>Result:</strong>
+                                        {% if step_results[i].action.success %}
+                                            <span class="success">Success</span>
+                                        {% else %}
+                                            <span class="error">Failed</span>
+                                        {% endif %}
+                                    </div>
+
+                                    <div class="step-reason">
+                                        <strong>Reason:</strong> {{ step_results[i].action.reason }}
+                                    </div>
+                                {% endif %}
+
+                                <!-- Add screenshot if present -->
+                                {% if step_results[i].screenshot_b64 %}
+                                    <div class="step-screenshot">
+                                        <h5>Screenshot:</h5>
+                                        <img src="data:image/png;base64,{{ step_results[i].screenshot_b64 }}" alt="Step {{ i+1 }} Screenshot" class="step-screenshot-img">
+                                    </div>
+                                {% endif %}
+
+                                <!-- Add verifications -->
+                                {% if step_results[i].verifications %}
+                                    <div class="step-verifications">
+                                        <h5>Verifications:</h5>
+                                        <ul>
+                                            {% for v in step_results[i].verifications %}
+                                                <li class="verification {% if v.passed %}verification-passed{% else %}verification-failed{% endif %}">
+                                                    <strong>{% if v.passed %}✓ Passed{% else %}✗ Failed{% endif %}:</strong> {{ v.reason }}
+                                                </li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <!-- Failure details (shown only for failures) -->
+                            {% if not step_results[i].action.success %}
+                                <div class="failure-details">
+                                    <div class="step-failed">Step failed</div>
+                                    <div>Reason: {{ step_results[i].action.reason }}</div>
+                                </div>
+                            {% elif step_results[i].verifications and step_results[i].verifications|selectattr('passed', 'equalto', false)|list|length > 0 %}
+                                <div class="failure-details">
+                                    <div class="verify-failed">Verification failed</div>
+                                    {% for j, v in enumerate(step_results[i].verifications) %}
+                                        {% if not v.passed %}
+                                            <div>Verification {{ j+1 }} failed: {{ v.reason }}</div>
+                                        {% endif %}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ol>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="timestamp">
+        Report generated on {{ timestamp }} by Lila
+    </div>
+
+    <script>
+        function toggleDetails(id) {
+            const details = document.getElementById(id);
+            if (details.style.display === 'block') {
+                details.style.display = 'none';
+            } else {
+                details.style.display = 'block';
+            }
+        }
+    </script>
+</body>
+</html>
