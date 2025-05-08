@@ -184,25 +184,35 @@ def setup_logging(debug: bool):
 
         if "test_name" in record["extra"]:
             MAX_STEP_LENGTH = 20
+            test_name = record["extra"]["test_name"]
+
             if "step" in record["extra"]:
-                record["extra"]["step"] = (
+                step = (
                     record["extra"]["step"]
                     .replace("\n", " ")
                     .replace("{", "")
                     .replace("}", "")
                 )
-                if len(record["extra"]["step"]) > MAX_STEP_LENGTH:
-                    if "verify" in record["extra"]:
-                        ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"][:MAX_STEP_LENGTH]}... | verifications]</cyan> '
-                    else:
-                        ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"][:MAX_STEP_LENGTH]}...]</cyan> '
-                else:
-                    if "verify" in record["extra"]:
-                        ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"]} | verifications]</cyan> '
-                    else:
-                        ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"]}]</cyan> '
+                step_text = f"{step[:MAX_STEP_LENGTH]}{'...' if len(step) > MAX_STEP_LENGTH else ''}"
+
+                # Context formatting with action/verification flags
+                action_tag = " | ▶" if "action" in record["extra"] else ""
+
+                # Add verification flag and text if present
+                verification_tag = ""
+                if "verify" in record["extra"]:
+                    verification_tag = " | ✓"
+                    if "verification_text" in record["extra"]:
+                        v_text = record["extra"]["verification_text"]
+                        # Truncate verification text if too long
+                        MAX_VERIFY_LENGTH = 30
+                        v_text = v_text.replace("\n", " ")
+                        v_text = f"{v_text[:MAX_VERIFY_LENGTH]}{'...' if len(v_text) > MAX_VERIFY_LENGTH else ''}"
+                        verification_tag = f" | ✓ {v_text}"
+
+                ret += f"<cyan>[{test_name} | {step_text}{action_tag}{verification_tag}]</cyan> "
             else:
-                ret += f'<cyan>[{record["extra"]["test_name"]}]</cyan> '
+                ret += f"<cyan>[{test_name}]</cyan> "
 
         ret += f'<level>{record["message"]}</level>\n'
         return ret

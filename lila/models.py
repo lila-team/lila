@@ -96,26 +96,7 @@ class Step:
             logger.error("No result returned from verification agent")
             raise ValueError("No result returned from verification agent")
 
-    async def run_verifications(
-        self, context: BrowserContext, llm: BaseChatModel
-    ) -> List[Verification]:
-        if not self.verify:
-            return []
-
-        verifications = [self.verify] if isinstance(self.verify, str) else self.verify
-
-        ret = []
-        for verification in verifications:
-            logger.debug(f"Verifying {verification}")
-            result = await self.run_verification(context, verification, llm)
-            if result.passed:
-                logger.info(f"Verification passed: {result.reason}")
-            else:
-                logger.error(f"Verification failed: {result.reason}")
-
-            ret.append(result)
-
-        return ret
+    # Verifications are now handled directly in the handle method
 
     async def _handle_action(
         self, context: BrowserContext, llm: BaseChatModel
@@ -153,13 +134,25 @@ class Step:
             )
         else:
             logger.info(f"Completed successfully: {action_result.reason}")
-            with logger.contextualize(verify=True):
-                verifications = await self.run_verifications(context, llm)
-                return StepResult(
-                    action=action_result,
-                    screenshot_b64=await context.take_screenshot(),
-                    verifications=verifications,
-                )
+            # Use simpler verification flag
+            verifications = []
+            for verification in (
+                [self.verify] if isinstance(self.verify, str) else self.verify
+            ):
+                with logger.contextualize(verify=True, verification_text=verification):
+                    logger.debug(f"Verifying: {verification}")
+                    result = await self.run_verification(context, verification, llm)
+                    verifications.append(result)
+                    if result.passed:
+                        logger.info(f"Verification passed: {result.reason}")
+                    else:
+                        logger.error(f"Verification failed: {result.reason}")
+
+            return StepResult(
+                action=action_result,
+                screenshot_b64=await context.take_screenshot(),
+                verifications=verifications,
+            )
 
     def dump(self):
         key = self.__class__.__name__.lower()
@@ -325,24 +318,30 @@ class TestCaseDef:
         id = str(uuid.uuid4())
         step_results = []
         ckpt = time.time()
-        with logger.contextualize(test_name=path):
+        # Use shorter path for test name context
+        test_id = Path(path).stem
+        with logger.contextualize(test_name=test_id):
             context = self.initialize_browser_context(config, browser_state)
             logger.debug(f"Browser context initialized for {id}: {context}")
 
             for idx, step in enumerate(self.steps):
                 step_type = step.get_type()
                 step_content = step.get_value()
-                with logger.contextualize(step=f"{step_type} {step_content}"):
-                    logger.debug(f"Starting step {idx}")
-                    step_result = await step.handle(
-                        context,
-                        config,
-                        llm,
-                    )
+                # Use a simplified step description for logging
+                step_desc = f"{step_type}:{step_content}"
+                with logger.contextualize(step=step_desc):
+                    logger.debug(f"Step {idx+1}")
+                    # Add action context flag for logging
+                    with logger.contextualize(action=True):
+                        step_result = await step.handle(
+                            context,
+                            config,
+                            llm,
+                        )
                     step_results.append(step_result)
 
                     if not step_result.action.success:
-                        logger.error(f"Step failed: {step_result.action.reason}")
+                        logger.error(f"Failed: {step_result.action.reason}")
                         await self.teardown(context, id, config)
                         return TestCaseRun(
                             id=id,
