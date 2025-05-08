@@ -28,9 +28,9 @@ jobs:
         playwright install chromium
     - name: Run Calendly
       env:
-        LILA_API_KEY: ${{ secrets.LILA_API_KEY  }}
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
       run: |
-        lila run tests/calendly.yaml --headless
+        lila run tests/calendly.yaml --model claude-3-5-haiku-20241022 --provider anthropic --headless
   google-maps:
     runs-on: ubuntu-latest
     steps:
@@ -50,9 +50,9 @@ jobs:
         playwright install chromium
     - name: Run Google Maps
       env:
-        LILA_API_KEY: ${{ secrets.LILA_API_KEY  }}
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
       run: |
-        lila run tests/google-maps.yaml --headless
+        lila run tests/google-maps.yaml --model claude-3-5-haiku-20241022 --provider anthropic --headless
   github:
     runs-on: ubuntu-latest
     steps:
@@ -72,9 +72,9 @@ jobs:
         playwright install chromium
     - name: Run Github
       env:
-        LILA_API_KEY: ${{ secrets.LILA_API_KEY  }}
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
       run: |
-        lila run tests/github.yaml --headless
+        lila run tests/github.yaml --model claude-3-5-haiku-20241022 --provider anthropic --headless
   google-search:
     runs-on: ubuntu-latest
     steps:
@@ -94,6 +94,6 @@ jobs:
         playwright install chromium
     - name: Run Google Search
       env:
-        LILA_API_KEY: ${{ secrets.LILA_API_KEY  }}
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
       run: |
-        lila run tests/google-search.yaml --headless
+        lila run tests/google-search.yaml --model claude-3-5-haiku-20241022 --provider anthropic --headless
