@@ -4,28 +4,24 @@ import re
 import tempfile
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from browser_use import Agent, Browser, Controller
-from browser_use.browser.context import BrowserContext, BrowserContextConfig
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple
-from lila.config import Config
-from pydantic import BaseModel
+from typing import List, Optional
+
 from browser_use import Agent, Browser, BrowserConfig, Controller
+from browser_use.browser.context import BrowserContext, BrowserContextConfig
 from langchain_core.language_models.chat_models import BaseChatModel
+from loguru import logger
+from pydantic import BaseModel
+
+from lila.config import Config
 from lila.utils import (
-    dump_browser_state,
-    render_template_to_file,
+    fake_vars,
+    get_vars,
     replace_vars_in_content,
     run_command,
 )
-
-import yaml
-from dacite import from_dict
-from loguru import logger
-
 
 TIMEOUT = timedelta(hours=1)
 MINUTE_IN_SECS = 60
@@ -77,7 +73,9 @@ class Step:
         return get_vars(value)
 
     @staticmethod
-    async def run_verification(context: BrowserContext, verification: str, llm: BaseChatModel) -> Verification:
+    async def run_verification(
+        context: BrowserContext, verification: str, llm: BaseChatModel
+    ) -> Verification:
         controller = Controller(output_model=Verification)
         agent = Agent(
             browser_context=context,
@@ -93,15 +91,14 @@ class Step:
                 return Verification.model_validate_json(result)
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse verification result: {e}")
-                raise ValueError(
-                    "Invalid JSON format in verification result"
-                ) from e
+                raise ValueError("Invalid JSON format in verification result") from e
         else:
             logger.error("No result returned from verification agent")
             raise ValueError("No result returned from verification agent")
 
-
-    async def run_verifications(self, context: BrowserContext, llm: BaseChatModel) -> List[Verification]:
+    async def run_verifications(
+        self, context: BrowserContext, llm: BaseChatModel
+    ) -> List[Verification]:
         if not self.verify:
             return []
 
@@ -120,7 +117,9 @@ class Step:
 
         return ret
 
-    async def _handle_action(self, context: BrowserContext, llm: BaseChatModel) -> ActionResult:
+    async def _handle_action(
+        self, context: BrowserContext, llm: BaseChatModel
+    ) -> ActionResult:
         controller = Controller(output_model=ActionResult)
         agent = Agent(
             browser_context=context,
@@ -136,15 +135,14 @@ class Step:
                 return ActionResult.model_validate_json(result)
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse action result: {e}")
-                raise ValueError(
-                    "Invalid JSON format in action result"
-                ) from e
+                raise ValueError("Invalid JSON format in action result") from e
         else:
             logger.error("No result returned from action agent")
             raise ValueError("No result returned from action agent")
 
-
-    async def handle(self, context: BrowserContext, config: Config, llm: BaseChatModel) -> StepResult:
+    async def handle(
+        self, context: BrowserContext, config: Config, llm: BaseChatModel
+    ) -> StepResult:
         action_result = await self._handle_action(context, llm)
         if not action_result.success:
             logger.error(f"Action failed: {action_result.reason}")
@@ -167,15 +165,6 @@ class Step:
         value = self.__dict__[key]
         return {key: value, "verify": self.verify}
 
-    def data_with_secrets(self, secrets_mapping: Optional[Dict[str, str]]) -> str:
-        # Replace secrets in the step content
-        secrets_mapping = secrets_mapping or {}
-        data = self.__dict__[self.__class__.__name__.lower()]
-        new_data = replace_vars(data, secrets_mapping)
-        logger.debug(f"Secrets mapping: {secrets_mapping.keys()}")
-        logger.debug(f"Replacing secrets in {data}")
-        return new_data
-
 
 @dataclass
 class Pick(Step):
@@ -194,6 +183,7 @@ class Submit(Step):
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Submit":
         return cls(submit=content, verify=verify or [])
 
+
 @dataclass
 class Input(Step):
     input: str
@@ -201,6 +191,7 @@ class Input(Step):
     @classmethod
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Input":
         return cls(input=content, verify=verify or [])
+
 
 @dataclass
 class Click(Step):
@@ -232,7 +223,9 @@ class Wait(Step):
 
         return super().validate()
 
-    async def _handle_action(self, context: BrowserContext, llm: BaseChatModel) -> ActionResult:
+    async def _handle_action(
+        self, context: BrowserContext, llm: BaseChatModel
+    ) -> ActionResult:
         # Wait for the specified time
         wait_time = int(self.wait)
         page = await context.get_current_page()
@@ -248,8 +241,9 @@ class Exec(Step):
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Exec":
         return cls(exec=content, verify=verify or [])
 
-
-    async def _handle_action(self, context: BrowserContext, llm: BaseChatModel) -> ActionResult:
+    async def _handle_action(
+        self, context: BrowserContext, llm: BaseChatModel
+    ) -> ActionResult:
         cmds = replace_vars_in_content(self.exec).split("\n")
         for cmd in cmds:
             if cmd:
@@ -265,9 +259,7 @@ class Exec(Step):
                         reason=f"Command failed with return code {rc}",
                     )
 
-        return ActionResult(
-            success=True, reason="Command executed successfully"
-        )
+        return ActionResult(success=True, reason="Command executed successfully")
 
 
 @dataclass
@@ -305,7 +297,9 @@ class Goto(Step):
 
         return super().validate()
 
-    async def _handle_action(self, context: BrowserContext, llm: BaseChatModel) -> ActionResult:
+    async def _handle_action(
+        self, context: BrowserContext, llm: BaseChatModel
+    ) -> ActionResult:
         page = await context.get_current_page()
         await page.goto(replace_vars_in_content(self.goto))
         await context._wait_for_page_and_frames_load()
@@ -333,15 +327,12 @@ class TestCaseDef:
         with logger.contextualize(test_name=path):
             context = self.initialize_browser_context(config, browser_state)
             logger.debug(f"Browser context initialized for {id}: {context}")
-            success = True
 
             for idx, step in enumerate(self.steps):
-                step_type= step.get_type()
+                step_type = step.get_type()
                 step_content = step.get_value()
                 with logger.contextualize(step=f"{step_type} {step_content}"):
-                    logger.debug(
-                        f"Starting step {idx}"
-                    )
+                    logger.debug(f"Starting step {idx}")
                     step_result = await step.handle(
                         context,
                         config,
@@ -361,8 +352,10 @@ class TestCaseDef:
                             duration=time.time() - ckpt,
                         )
 
-                    if step_result.verifications and any(not v.passed for v in step_result.verifications):
-                        logger.error(f"Step verifications failed")
+                    if step_result.verifications and any(
+                        not v.passed for v in step_result.verifications
+                    ):
+                        logger.error("Step verifications failed")
                         await self.teardown(context, id, config)
                         return TestCaseRun(
                             id=id,
@@ -373,7 +366,7 @@ class TestCaseDef:
                             duration=time.time() - ckpt,
                         )
 
-                    logger.info(f"Step completed successfully")
+                    logger.info("Step completed successfully")
 
             logger.info("All steps completed successfully")
 
@@ -386,7 +379,6 @@ class TestCaseDef:
                 steps_results=step_results,
                 duration=time.time() - ckpt,
             )
-
 
     @staticmethod
     def initialize_browser_context(
@@ -429,10 +421,10 @@ class TestCaseDef:
         logger.debug(f"Browser state saved for {run_id} at {path}")
         await context.close()
         await context.browser.close()
-            # self.dump_report(config.runtime.output_dir, report)
-            # report_path = Path(config.runtime.output_dir) / f"{name}.html"
-            # logger.info(f"Report saved at {report_path}")
-            # return success
+        # self.dump_report(config.runtime.output_dir, report)
+        # report_path = Path(config.runtime.output_dir) / f"{name}.html"
+        # logger.info(f"Report saved at {report_path}")
+        # return success
 
 
 @dataclass
@@ -445,5 +437,3 @@ class TestCaseRun:
     steps_results: List[StepResult] = field(default_factory=list)
 
     duration: float = 0.0
-
-

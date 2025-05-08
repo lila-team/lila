@@ -4,7 +4,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import requests
 from browser_use.agent.views import ActionResult
@@ -272,3 +272,17 @@ def get_langchain_chat_model(model: str, provider: str) -> BaseChatModel:
     )
     logger.debug(f"Using model: {model}")
     return model
+
+
+def fake_vars(content: str, fake_env_f: Callable[[str], str]) -> str:
+    # Searches for all ${VAR_NAME} and replaces them with the value of the environment variable VAR_NAME
+    regex = re.compile(r"\${(.*?)}")
+    for match in regex.findall(content):
+        logger.debug(f"Matched: {match}")
+        value = fake_env_f(match)
+        if value is None:
+            logger.warning(f"Mapping variable {match} not found")
+            continue
+        content = content.replace(f"${{{match}}}", value)
+
+    return content
