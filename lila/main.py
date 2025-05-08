@@ -5,6 +5,8 @@ import shutil
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
+from dacite import from_dict
+from dataclasses import dataclass
 
 import click
 import requests
@@ -13,7 +15,8 @@ from loguru import logger
 
 from lila.config import Config
 from lila.const import BASE_URL
-from lila.runner import TestRunner, collect_test_cases
+from lila.runner import TestRunner
+from lila.models import TestCaseDef
 from lila.utils import (
     get_langchain_chat_model,
     get_missing_vars,
@@ -23,43 +26,43 @@ from lila.utils import (
 )
 
 
-def validate_content(content: str, server_url: str) -> None:
-    try:
-        yaml.safe_load(content)
-        logger.debug("Content is a valid YAML")
-    except yaml.YAMLError as e:
-        raise ValueError(f"Provided content is not a valid YAML: {e}")
-
-    vars_list = get_vars(content)
-    logger.debug(f"Found variables: {vars}")
-
-    missing_vars = get_missing_vars(vars_list)
-    if missing_vars:
-        raise ValueError(f"Missing environment variables: {missing_vars}")
+@dataclass
+class TestCollection:
+    valid: Dict[str, TestCaseDef]
+    invalid: Dict[str, str]
 
 
-def find_parsing_errors(test_paths: List[str], server_url: str) -> Dict[str, str]:
+def parse_collection(test_paths: List[str]) -> TestCollection:
     invalid_tests = {}
+    valid_tests = {}
+
     for path in test_paths:
         with open(path, "r") as f:
             content = f.read()
-            try:
-                validate_content(content, server_url)
-            except ValueError as e:
-                invalid_tests[path] = str(e)
+            logger.debug(f"Read file: {path}")
 
-    return invalid_tests
+            vars_list = get_vars(content)
+            logger.debug(f"Found variables: {vars}")
 
+            missing_vars = get_missing_vars(vars_list)
+            if missing_vars:
+                logger.debug(f"Missing environment variables: {missing_vars}")
+                invalid_tests[path] = f"Missing environment variables: {missing_vars}"
+            else:
+                try:
+                    parsed = yaml.safe_load(content)
+                except yaml.YAMLError as e:
+                    invalid_tests[path] = "Provided content is not a valid YAML: {e}"
+                else:
+                    logger.debug("Content is a valid YAML")
+                    try:
+                        test = from_dict(data_class=TestCaseDef, data=parsed)
+                    except Exception as e:
+                        invalid_tests[path] = str(e)
+                    else:
+                        valid_tests[path] = test
 
-def raise_for_status(response: requests.Response):
-    try:
-        response.raise_for_status()
-    except requests.RequestException as e:
-        try:
-            data = response.json()
-            raise RuntimeError(f"Error: {data}") from e
-        except json.JSONDecodeError:
-            raise RuntimeError(f"Error: {response.text}") from e
+    return TestCollection(valid=valid_tests, invalid=invalid_tests)
 
 
 @click.group()
@@ -213,22 +216,24 @@ def run(
         logger.error(f"No YAML files found in the provided path: {path}")
         return
 
-    invalid_files = find_parsing_errors(test_files, config_obj.runtime.server_url)
-    if invalid_files:
+    test_collection = parse_collection(test_files)
+    if test_collection.invalid:
         logger.error("Parsing errors found")
-        for path, error in invalid_files.items():
+        for path, error in test_collection.invalid.items():
             logger.error(f"File {path}: {error}")
         return
 
-    testcases = collect_test_cases(test_files, tag_list, exclude_tag_list)
-
-    if not testcases:
+    if not test_collection.valid:
         logger.error(
             "No test cases found with the provided path and the provided params"
         )
         return
 
-    runner = TestRunner(testcases)
+    logger.info(f"Collected {len(test_collection.valid)} test cases")
+    for path, test_def in test_collection.valid.items():
+        logger.info(f"\t{path}")
+
+    runner = TestRunner(test_collection.valid)
     success = runner.run_tests(config_obj, browser_state, llm)
     if not success:
         sys.exit(1)
