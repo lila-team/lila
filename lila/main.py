@@ -1,15 +1,18 @@
+import base64
+import datetime
 import os
 import pathlib
 import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import click
 import requests
 import yaml
 from dacite import from_dict
+from jinja2 import Template
 from loguru import logger
 
 from lila.config import Config
@@ -29,6 +32,70 @@ from lila.utils import (
 class TestCollection:
     valid: Dict[str, TestCaseDef]
     invalid: Dict[str, str]
+
+
+def generate_html_report(test_results, output_dir: str) -> Tuple[str, float]:
+    """
+    Generate an HTML report for test results and save it to the output directory.
+
+    Args:
+        test_results: List of test results
+        output_dir: Directory to save the report
+
+    Returns:
+        Tuple of (report_path, total_duration)
+    """
+    # Make sure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Calculate summary metrics
+    total_tests = len(test_results)
+    passed_tests = sum(1 for result in test_results if result.status == "success")
+    failed_tests = total_tests - passed_tests
+    total_duration = sum(result.duration for result in test_results)
+
+    # Try to load the logo
+    logo_base64 = ""
+    logo_path = Path(__file__).parent / "assets" / "logo.png"
+    if logo_path.exists():
+        with open(logo_path, "rb") as f:
+            logo_base64 = base64.b64encode(f.read()).decode("utf-8")
+
+    # Load the template
+    template_path = Path(__file__).parent / "assets" / "test_results.html"
+    with open(template_path, "r") as f:
+        template_content = f.read()
+
+    # Create Jinja template
+    template = Template(template_content)
+
+    # Prepare timestamp
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Render the template
+    html_content = template.render(
+        test_results=test_results,
+        total_tests=total_tests,
+        passed_tests=passed_tests,
+        failed_tests=failed_tests,
+        total_duration=round(total_duration, 2),
+        timestamp=timestamp,
+        logo_base64=logo_base64,
+        enumerate=enumerate,
+        len=len,
+    )
+
+    # Generate the report filename
+    report_filename = (
+        f"lila_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+    )
+    report_path = os.path.join(output_dir, report_filename)
+
+    # Write the report file
+    with open(report_path, "w") as f:
+        f.write(html_content)
+
+    return report_path, total_duration
 
 
 def parse_collection(test_paths: List[str]) -> TestCollection:
@@ -279,6 +346,23 @@ def run(
                         if not v.passed:
                             print(f"  Verification {j+1} failed: {v.reason}")
                     break
+
+    # Generate HTML report
+    output_dir = config_obj.runtime.output_dir
+    report_path, total_duration = generate_html_report(test_results, output_dir)
+
+    # Convert to absolute path if needed
+    if not os.path.isabs(report_path):
+        report_path = os.path.abspath(report_path)
+
+    # Get a file:// URL for the report
+    report_url = f"file://{report_path}"
+
+    print("\n" + "=" * 70)
+    print(f"📊 DETAILED HTML REPORT: {report_path}")
+    print(f"📈 Open in browser: {report_url}")
+    print(f"⏱️ Total test duration: {total_duration:.2f}s")
+    print("=" * 70)
 
     print("\n")
     if failed_tests > 0:

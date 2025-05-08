@@ -367,7 +367,7 @@ class TestCaseDef:
                             duration=time.time() - ckpt,
                         )
 
-                    logger.info("Step completed successfully")
+                    logger.debug("Step completed successfully")
 
             logger.info("All steps completed successfully")
 
