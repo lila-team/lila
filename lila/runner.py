@@ -1,12 +1,12 @@
 import asyncio
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from lila.config import Config
-from lila.models import TestCaseDef
+from lila.models import TestCaseDef, TestCaseRun
 
 
 class TestRunner:
@@ -18,7 +18,7 @@ class TestRunner:
         config: Config,
         browser_state: Optional[str],
         llm: BaseChatModel,
-    ) -> None:
+    ) -> List[TestCaseRun]:
         future_to_test = {}
         results = []
 
@@ -26,7 +26,7 @@ class TestRunner:
             max_workers=config.runtime.concurrent_workers
         ) as executor:
             for path, testcase in self.testcases.items():
-                # For debuggin purposes
+                # For debugging purposes
                 def run_wrapper(*args, **kwargs):
                     try:
                         return asyncio.run(testcase.run(*args, **kwargs))
@@ -47,3 +47,5 @@ class TestRunner:
             for future in as_completed(future_to_test.keys()):
                 testcase_run = future.result()
                 results.append(testcase_run)
+
+        return results

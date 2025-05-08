@@ -192,9 +192,15 @@ def setup_logging(debug: bool):
                     .replace("}", "")
                 )
                 if len(record["extra"]["step"]) > MAX_STEP_LENGTH:
-                    ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"][:MAX_STEP_LENGTH]}...]</cyan> '
+                    if "verify" in record["extra"]:
+                        ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"][:MAX_STEP_LENGTH]}... | verifications]</cyan> '
+                    else:
+                        ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"][:MAX_STEP_LENGTH]}...]</cyan> '
                 else:
-                    ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"]}]</cyan> '
+                    if "verify" in record["extra"]:
+                        ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"]} | verifications]</cyan> '
+                    else:
+                        ret += f'<cyan>[{record["extra"]["test_name"]}| {record["extra"]["step"]}]</cyan> '
             else:
                 ret += f'<cyan>[{record["extra"]["test_name"]}]</cyan> '
 

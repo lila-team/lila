@@ -79,7 +79,7 @@ class Step:
         controller = Controller(output_model=Verification)
         agent = Agent(
             browser_context=context,
-            task=f"Verify the following verification: {verification}. You are not allowed to perform any action.",
+            task=f"Perform a VISUAL VERIFICATION ONLY of: {verification}. DO NOT perform any actions. Keep reason under 100 chars, be concise.",
             llm=llm,
             controller=controller,
         )
@@ -123,7 +123,7 @@ class Step:
         controller = Controller(output_model=ActionResult)
         agent = Agent(
             browser_context=context,
-            task=f"Do the following: {self.get_type()} {self.get_value()}",
+            task=f"Attempt this action: {self.get_type()} {self.get_value()}. Follow instructions exactly, no alternative approaches. Keep reason under 100 chars, be concise.",
             llm=llm,
             controller=controller,
         )
@@ -152,13 +152,14 @@ class Step:
                 verifications=[],
             )
         else:
-            logger.info(f"Action completed successfully: {action_result.reason}")
-            verifications = await self.run_verifications(context, llm)
-            return StepResult(
-                action=action_result,
-                screenshot_b64=await context.take_screenshot(),
-                verifications=verifications,
-            )
+            logger.info(f"Completed successfully: {action_result.reason}")
+            with logger.contextualize(verify=True):
+                verifications = await self.run_verifications(context, llm)
+                return StepResult(
+                    action=action_result,
+                    screenshot_b64=await context.take_screenshot(),
+                    verifications=verifications,
+                )
 
     def dump(self):
         key = self.__class__.__name__.lower()

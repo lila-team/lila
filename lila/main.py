@@ -1,22 +1,21 @@
-import json
 import os
 import pathlib
 import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
-from dacite import from_dict
-from dataclasses import dataclass
 
 import click
 import requests
 import yaml
+from dacite import from_dict
 from loguru import logger
 
 from lila.config import Config
 from lila.const import BASE_URL
-from lila.runner import TestRunner
 from lila.models import TestCaseDef
+from lila.runner import TestRunner
 from lila.utils import (
     get_langchain_chat_model,
     get_missing_vars,
@@ -51,7 +50,7 @@ def parse_collection(test_paths: List[str]) -> TestCollection:
             else:
                 try:
                     parsed = yaml.safe_load(content)
-                except yaml.YAMLError as e:
+                except yaml.YAMLError:
                     invalid_tests[path] = "Provided content is not a valid YAML: {e}"
                 else:
                     logger.debug("Content is a valid YAML")
@@ -229,13 +228,60 @@ def run(
         )
         return
 
-    logger.info(f"Collected {len(test_collection.valid)} test cases")
-    for path, test_def in test_collection.valid.items():
-        logger.info(f"\t{path}")
+    # Print test collection in a pytest-like format
+    test_count = len(test_collection.valid)
+    print(f"\nCollected {test_count} test{'s' if test_count != 1 else ''}")
+    print("=" * 70)
+    for i, (path, test_def) in enumerate(test_collection.valid.items(), 1):
+        # Extract file name from path for cleaner display
+        file_name = path.split("/")[-1]
+        # Show tags if present
+        tags_str = ""
+        if hasattr(test_def, "tags") and test_def.tags:
+            tags_str = f" [tags: {', '.join(test_def.tags)}]"
+        print(f"{i}) {file_name}{tags_str}")
+    print("=" * 70)
 
     runner = TestRunner(test_collection.valid)
-    success = runner.run_tests(config_obj, browser_state, llm)
-    if not success:
+    test_results = runner.run_tests(config_obj, browser_state, llm)
+
+    # Print test results summary
+    total_tests = len(test_results)
+    passed_tests = sum(1 for result in test_results if result.status == "success")
+    failed_tests = total_tests - passed_tests
+
+    print("\n" + "=" * 70)
+    print(f"TEST RESULTS SUMMARY: {passed_tests}/{total_tests} passed")
+    print("=" * 70)
+
+    # Print detailed results for each test
+    for result in test_results:
+        test_status = "✅ PASSED" if result.status == "success" else "❌ FAILED"
+        duration = f"{result.duration:.2f}s"
+        print(f"\n{test_status} {result.path} ({duration})")
+
+        if result.status == "failed":
+            # Find the failed step
+            for i, step_result in enumerate(result.steps_results):
+                if not step_result.action.success:
+                    step_type = result.test_def.steps[i].get_type()
+                    step_value = result.test_def.steps[i].get_value()
+                    print(f"  Failed at step {i+1}: {step_type} {step_value}")
+                    print(f"  Reason: {step_result.action.reason}")
+                    break
+                elif step_result.verifications and any(
+                    not v.passed for v in step_result.verifications
+                ):
+                    step_type = result.test_def.steps[i].get_type()
+                    step_value = result.test_def.steps[i].get_value()
+                    print(f"  Failed at step {i+1}: {step_type} {step_value}")
+                    for j, v in enumerate(step_result.verifications):
+                        if not v.passed:
+                            print(f"  Verification {j+1} failed: {v.reason}")
+                    break
+
+    print("\n")
+    if failed_tests > 0:
         sys.exit(1)
 
 
