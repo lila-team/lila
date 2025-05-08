@@ -9,14 +9,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import click
-import requests
 import yaml
 from dacite import from_dict
 from jinja2 import Template
 from loguru import logger
 
 from lila.config import Config
-from lila.const import BASE_URL
 from lila.models import TestCaseDef
 from lila.runner import TestRunner
 from lila.utils import (
@@ -404,47 +402,3 @@ def init():
     shutil.copy(example_path, "demo.yaml")
     logger.info("Example test case created: demo.yaml")
     logger.success("All set! Run your first test: lila run demo.yaml")
-
-
-@click.option("--config", type=str, help="Path to the Lila config file", required=False)
-@cli.command()
-def check(
-    config: Optional[str],
-) -> None:
-    """Check if Lila is properly set up and ready to run tests."""
-    setup_logging(debug=False)
-    if "LILA_API_KEY" not in os.environ:
-        logger.error(
-            f"Please set the LILA_API_KEY environment variable in your .env file or as a command environment variable. You can find it in the Lila app: {BASE_URL}"
-        )
-        return
-
-    if os.environ["LILA_API_KEY"] == "<insert-your-api-key>":
-        logger.error(
-            f"Place your API key in the .env file. You can find it in the Lila app: {BASE_URL}"
-        )
-        return
-
-    config_obj = _get_config(config)
-    server_url = config_obj.runtime.server_url
-    ret = requests.get(
-        f"{server_url}/api/v1/readiness",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {os.environ['LILA_API_KEY']}",
-        },
-    )
-    if ret.status_code == 401:
-        logger.error("Invalid LILA_API_KEY. Please set the correct API key.")
-        sys.exit(1)
-        return
-
-    if ret.status_code != 200:
-        logger.error(f"Lila is not ready to run tests [code: {ret.status_code}]")
-        sys.exit(1)
-        return
-
-    data = ret.json()
-    logger.success(f"API Key valid for team: {data['team']}")
-    logger.success("Lila is properly set up and ready to run tests.")
