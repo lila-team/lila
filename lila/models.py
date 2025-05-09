@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -234,8 +235,7 @@ class Wait(Step):
     ) -> ActionResult:
         # Wait for the specified time
         wait_time = int(self.wait)
-        page = await context.get_current_page()
-        await page.wait_for_timeout(wait_time * 1000)  # Convert seconds to milliseconds
+        await asyncio.sleep(wait_time)
         return ActionResult(success=True, reason="Wait completed successfully")
 
 
@@ -306,9 +306,7 @@ class Goto(Step):
     async def _handle_action(
         self, context: BrowserContext, llm: BaseChatModel
     ) -> ActionResult:
-        page = await context.get_current_page()
-        await page.goto(replace_vars_in_content(self.goto))
-        await context._wait_for_page_and_frames_load()
+        await context.navigate_to(self.goto)
         return ActionResult(success=True, reason="Navigation completed successfully")
 
 
