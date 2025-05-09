@@ -171,7 +171,7 @@ async def press_key(params: PressKeyWithFocus, context: BrowserContext):
 
 def setup_logging(debug: bool):
     # Cleanup existing config
-    logger.remove()
+    # logger.remove()
 
     def formatter(record):
         ret = ""
