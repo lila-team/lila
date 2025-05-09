@@ -94,8 +94,8 @@ class Step:
                 logger.error(f"Failed to parse verification result: {e}")
                 raise ValueError("Invalid JSON format in verification result") from e
         else:
-            logger.error("No result returned from verification agent")
-            raise ValueError("No result returned from verification agent")
+            logger.error(f"No result returned from verification agent: {history}")
+            raise ValueError(f"No result returned from verification agent {history}")
 
     # Verifications are now handled directly in the handle method
 
@@ -119,8 +119,8 @@ class Step:
                 logger.error(f"Failed to parse action result: {e}")
                 raise ValueError("Invalid JSON format in action result") from e
         else:
-            logger.error("No result returned from action agent")
-            raise ValueError("No result returned from action agent")
+            logger.error(f"No result returned from action agent: {history}")
+            raise ValueError(f"No result returned from action agent {history}")
 
     async def handle(
         self, context: BrowserContext, config: Config, llm: BaseChatModel
