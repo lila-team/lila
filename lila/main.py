@@ -236,6 +236,12 @@ def run(
     """Run a Lila test suite."""
     setup_logging(debug=debug)
 
+    # Need an LLM factory as it seems multiple agent creation with
+    # threads and asyncio messes up the LLM creation and produces
+    # a Connection Error on the second Agent call. This happens in some
+    # runtimes such as Github Actions:
+    # https://github.com/lila-team/lila/actions/runs/14936922184/job/41966431022
+    # Creating the factory allows the agent to have its dedicated llm object
     llm_factory = lambda: get_langchain_chat_model(model=model, provider=provider)  # noqa: E731
 
     try:
