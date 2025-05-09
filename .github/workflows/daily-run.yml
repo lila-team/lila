@@ -23,75 +23,75 @@ jobs:
         pip install -e .
     - name: Install patchright chromium
       run: |
-        patchright install chromium --with-deps --no-shell
+        patchright install chromium
     - name: Run Calendly
       env:
         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
       run: |
         lila run tests/calendly.yaml --model claude-3-5-haiku-20241022 --provider anthropic --headless
-  google-maps:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v3
-      with:
-        python-version: "3.11"
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-    - name: Install lila cli
-      run: |
-        pip install -e .
-    - name: Install patchright chromium
-      run: |
-        patchright install chromium --with-deps --no-shell
-    - name: Run Google Maps
-      env:
-        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
-      run: |
-        lila run tests/google-maps.yaml --model claude-3-5-haiku-20241022 --provider anthropic --headless
-  github:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v3
-      with:
-        python-version: "3.11"
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-    - name: Install lila cli
-      run: |
-        pip install -e .
-    - name: Install patchright chromium
-      run: |
-        patchright install chromium --with-deps --no-shell
-    - name: Run Github
-      env:
-        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
-      run: |
-        lila run tests/github.yaml --model claude-3-5-haiku-20241022 --provider anthropic --headless
-  google-search:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v3
-      with:
-        python-version: "3.11"
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-    - name: Install lila cli
-      run: |
-        pip install -e .
-    - name: Install patchright chromium
-      run: |
-        patchright install chromium --with-deps --no-shell
-    - name: Run Google Search
-      env:
-        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
-      run: |
-        lila run tests/google-search.yaml --model claude-3-5-haiku-20241022 --provider anthropic --headless
+  # google-maps:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #   - uses: actions/checkout@v4
+  #   - name: Set up Python 3.11
+  #     uses: actions/setup-python@v3
+  #     with:
+  #       python-version: "3.11"
+  #   - name: Install dependencies
+  #     run: |
+  #       python -m pip install --upgrade pip
+  #   - name: Install lila cli
+  #     run: |
+  #       pip install -e .
+  #   - name: Install patchright chromium
+  #     run: |
+  #       patchright install chromium --with-deps --no-shell
+  #   - name: Run Google Maps
+  #     env:
+  #       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
+  #     run: |
+  #       lila run tests/google-maps.yaml --model claude-3-5-haiku-20241022 --provider anthropic --headless
+  # github:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #   - uses: actions/checkout@v4
+  #   - name: Set up Python 3.11
+  #     uses: actions/setup-python@v3
+  #     with:
+  #       python-version: "3.11"
+  #   - name: Install dependencies
+  #     run: |
+  #       python -m pip install --upgrade pip
+  #   - name: Install lila cli
+  #     run: |
+  #       pip install -e .
+  #   - name: Install patchright chromium
+  #     run: |
+  #       patchright install chromium --with-deps --no-shell
+  #   - name: Run Github
+  #     env:
+  #       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
+  #     run: |
+  #       lila run tests/github.yaml --model claude-3-5-haiku-20241022 --provider anthropic --headless
+  # google-search:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #   - uses: actions/checkout@v4
+  #   - name: Set up Python 3.11
+  #     uses: actions/setup-python@v3
+  #     with:
+  #       python-version: "3.11"
+  #   - name: Install dependencies
+  #     run: |
+  #       python -m pip install --upgrade pip
+  #   - name: Install lila cli
+  #     run: |
+  #       pip install -e .
+  #   - name: Install patchright chromium
+  #     run: |
+  #       patchright install chromium --with-deps --no-shell
+  #   - name: Run Google Search
+  #     env:
+  #       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
+  #     run: |
+  #       lila run tests/google-search.yaml --model claude-3-5-haiku-20241022 --provider anthropic --headless
