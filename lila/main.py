@@ -236,7 +236,7 @@ def run(
     """Run a Lila test suite."""
     setup_logging(debug=debug)
 
-    llm = get_langchain_chat_model(model=model, provider=provider)
+    llm_factory = lambda: get_langchain_chat_model(model=model, provider=provider)  # noqa: E731
 
     try:
         config_obj = _get_config(config)
@@ -308,7 +308,7 @@ def run(
     print("=" * 70)
 
     runner = TestRunner(test_collection.valid)
-    test_results = runner.run_tests(config_obj, browser_state, llm)
+    test_results = runner.run_tests(config_obj, browser_state, llm_factory)
 
     # Print test results summary
     total_tests = len(test_results)

@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from browser_use import Agent, Browser, BrowserConfig, Controller
 from browser_use.browser.context import BrowserContext, BrowserContextConfig
@@ -75,13 +75,16 @@ class Step:
 
     @staticmethod
     async def run_verification(
-        context: BrowserContext, verification: str, llm: BaseChatModel
+        context: BrowserContext,
+        verification: str,
+        llm_factory: Callable[[], BaseChatModel],
     ) -> Verification:
         controller = Controller(output_model=Verification)
         agent = Agent(
+            enable_memory=False,
             browser_context=context,
             task=f"Perform a VISUAL VERIFICATION ONLY of: {verification}. DO NOT perform any actions. Keep reason under 100 chars, be concise.",
-            llm=llm,
+            llm=llm_factory(),
             controller=controller,
         )
         history = await agent.run()
@@ -100,13 +103,14 @@ class Step:
     # Verifications are now handled directly in the handle method
 
     async def _handle_action(
-        self, context: BrowserContext, llm: BaseChatModel
+        self, context: BrowserContext, llm_factory: Callable[[], BaseChatModel]
     ) -> ActionResult:
         controller = Controller(output_model=ActionResult)
         agent = Agent(
+            enable_memory=False,
             browser_context=context,
             task=f"Attempt this action: {self.get_type()} {self.get_value()}. Follow instructions exactly, no alternative approaches. Keep reason under 100 chars, be concise.",
-            llm=llm,
+            llm=llm_factory(),
             controller=controller,
         )
         history = await agent.run()
@@ -123,10 +127,13 @@ class Step:
             raise ValueError(f"No result returned from action agent {history}")
 
     async def handle(
-        self, context: BrowserContext, config: Config, llm: BaseChatModel
+        self,
+        context: BrowserContext,
+        config: Config,
+        llm_factory: Callable[[], BaseChatModel],
     ) -> StepResult:
         try:
-            action_result = await self._handle_action(context, llm)
+            action_result = await self._handle_action(context, llm_factory)
         except ValueError as e:
             logger.error(f"Error handling action: {e}")
             return StepResult(
@@ -152,7 +159,9 @@ class Step:
                 with logger.contextualize(verify=True, verification_text=verification):
                     logger.debug(f"Verifying: {verification}")
                     try:
-                        result = await self.run_verification(context, verification, llm)
+                        result = await self.run_verification(
+                            context, verification, llm_factory
+                        )
                         verifications.append(result)
                         if result.passed:
                             logger.info(f"Verification passed: {result.reason}")
@@ -231,7 +240,7 @@ class Wait(Step):
         return super().validate()
 
     async def _handle_action(
-        self, context: BrowserContext, llm: BaseChatModel
+        self, context: BrowserContext, *args, **kwargs
     ) -> ActionResult:
         # Wait for the specified time
         wait_time = int(self.wait)
@@ -248,7 +257,7 @@ class Exec(Step):
         return cls(exec=content, verify=verify or [])
 
     async def _handle_action(
-        self, context: BrowserContext, llm: BaseChatModel
+        self, context: BrowserContext, *args, **kwargs
     ) -> ActionResult:
         cmds = replace_vars_in_content(self.exec).split("\n")
         for cmd in cmds:
@@ -304,7 +313,7 @@ class Goto(Step):
         return super().validate()
 
     async def _handle_action(
-        self, context: BrowserContext, llm: BaseChatModel
+        self, context: BrowserContext, *args, **kwargs
     ) -> ActionResult:
         await context.navigate_to(self.goto)
         return ActionResult(success=True, reason="Navigation completed successfully")
@@ -323,7 +332,7 @@ class TestCaseDef:
         path: str,
         config: Config,
         browser_state: Optional[str],
-        llm: BaseChatModel,
+        llm_factory: Callable[[], BaseChatModel],
     ) -> "TestCaseRun":
         id = str(uuid.uuid4())
         step_results = []
@@ -346,7 +355,7 @@ class TestCaseDef:
                         step_result = await step.handle(
                             context,
                             config,
-                            llm,
+                            llm_factory,
                         )
                     step_results.append(step_result)
 

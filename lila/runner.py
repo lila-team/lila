@@ -1,7 +1,7 @@
 import asyncio
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -17,7 +17,7 @@ class TestRunner:
         self,
         config: Config,
         browser_state: Optional[str],
-        llm: BaseChatModel,
+        llm_factory: Callable[[], BaseChatModel],
     ) -> List[TestCaseRun]:
         future_to_test = {}
         results = []
@@ -40,7 +40,7 @@ class TestRunner:
                     path,
                     config,
                     browser_state,
-                    llm=llm,
+                    llm_factory,
                 )
                 future_to_test[key] = testcase
 
