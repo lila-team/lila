@@ -9,11 +9,10 @@ dependencies = [
     "requests",
     "tenacity",
     "pyyaml",
-    "playwright",
     "dacite",
-    "browser-use~=0.1.45",
+    "browser-use",
     "Jinja2",
-    "python-dotenv~=1.0"
+    "python-dotenv"
 ]
 dynamic = ['version']
 
