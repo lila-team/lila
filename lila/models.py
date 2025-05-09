@@ -414,12 +414,8 @@ class TestCaseDef:
             # Ref https://docs.browser-use.com/customize/browser-settings#context-configuration
             context_config = BrowserContextConfig(
                 wait_for_network_idle_page_load_time=3,
-                browser_window_size={
-                    "width": config.browser.width,
-                    "height": config.browser.height,
-                },
-                # pass -1 for highlighting all elements in the page
-                viewport_expansion=0,
+                window_width=config.browser.width,
+                window_height=config.browser.height,
                 cookies_file=cookies_file,
             )
 
