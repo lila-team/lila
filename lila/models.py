@@ -124,7 +124,16 @@ class Step:
     async def handle(
         self, context: BrowserContext, config: Config, llm: BaseChatModel
     ) -> StepResult:
-        action_result = await self._handle_action(context, llm)
+        try:
+            action_result = await self._handle_action(context, llm)
+        except ValueError as e:
+            logger.error(f"Error handling action: {e}")
+            return StepResult(
+                action=ActionResult(success=False, reason=str(e)),
+                screenshot_b64=await context.take_screenshot(),
+                verifications=[],
+            )
+
         if not action_result.success:
             logger.error(f"Action failed: {action_result.reason}")
             return StepResult(
@@ -141,12 +150,15 @@ class Step:
             ):
                 with logger.contextualize(verify=True, verification_text=verification):
                     logger.debug(f"Verifying: {verification}")
-                    result = await self.run_verification(context, verification, llm)
-                    verifications.append(result)
-                    if result.passed:
-                        logger.info(f"Verification passed: {result.reason}")
-                    else:
-                        logger.error(f"Verification failed: {result.reason}")
+                    try:
+                        result = await self.run_verification(context, verification, llm)
+                        verifications.append(result)
+                        if result.passed:
+                            logger.info(f"Verification passed: {result.reason}")
+                        else:
+                            logger.error(f"Verification failed: {result.reason}")
+                    except ValueError as e:
+                        verifications.append(Verification(passed=False, reason=str(e)))
 
             return StepResult(
                 action=action_result,
