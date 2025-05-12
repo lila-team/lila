@@ -24,9 +24,9 @@ jobs:
     - name: Install lila cli from source
       run: |
         pip install -e .
-    - name: Install patchright chromium
+    - name: Install playwright chromium
       run: |
-        patchright install chromium
+        playwright install chromium
     - name: Run Calendly
       env:
         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
@@ -46,9 +46,9 @@ jobs:
     - name: Install lila cli
       run: |
         pip install -e .
-    - name: Install patchright chromium
+    - name: Install playwright chromium
       run: |
-        patchright install chromium
+        playwright install chromium
     - name: Run Google Maps
       env:
         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
@@ -68,9 +68,9 @@ jobs:
     - name: Install lila cli
       run: |
         pip install -e .
-    - name: Install patchright chromium
+    - name: Install playwright chromium
       run: |
-        patchright install chromium
+        playwright install chromium
     - name: Run Github
       env:
         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
@@ -90,9 +90,9 @@ jobs:
     - name: Install lila cli
       run: |
         pip install -e .
-    - name: Install patchright chromium
+    - name: Install playwright chromium
       run: |
-        patchright install chromium
+        playwright install chromium
     - name: Run Google Search
       env:
         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY  }}
