@@ -116,31 +116,12 @@ class Step:
     ) -> ActionResult:
         controller = Controller(output_model=ActionResult)
 
-        # Build context section with previous and next steps
-        context_section = ""
-        if prev_steps or next_steps:
-            context_section = "<CONTEXT>\n"
-            if prev_steps and len(prev_steps) > 0:
-                context_section += "Previous steps:\n"
-                for i, step in enumerate(prev_steps):
-                    context_section += f"{i+1}. {step}\n"
-                context_section += "\n"
-
-            if next_steps and len(next_steps) > 0:
-                context_section += "Next steps:\n"
-                for i, step in enumerate(next_steps):
-                    context_section += f"{i+1}. {step}\n"
-                context_section += "\n"
-
-            context_section += "Note: This context is provided for your understanding only. The other steps will be executed by other agents. You should ONLY perform the action specified in your job description.\n"
-            context_section += "</CONTEXT>\n\n"
-
         agent = Agent(
             enable_memory=False,
             browser_context=context,
             task=f"""Your job is to perform ONLY this action: {self.get_type()} {self.get_value()}.
 
-{context_section}<INSTRUCTIONS>
+<INSTRUCTIONS>
 {self.task_instructions()}
 </INSTRUCTIONS>
 
