@@ -49,6 +49,11 @@ class StepResult:
 class Step:
     verify: str | List[str]
 
+    @property
+    def task_instructions(self) -> str:
+        """Instructions for the LLM on how to perform this specific action."""
+        return f"Perform a {self.get_type()} action on {self.get_value()}."
+
     def validate(self):
         pass
 
@@ -109,7 +114,7 @@ class Step:
         agent = Agent(
             enable_memory=False,
             browser_context=context,
-            task=f"Attempt this action: {self.get_type()} {self.get_value()}. Follow instructions exactly, no alternative approaches. Keep reason under 100 chars, be concise.",
+            task=f"Attempt this action: {self.get_type()} {self.get_value()}. {self.task_instructions} Follow instructions exactly, no alternative approaches. Keep reason under 100 chars, be concise.",
             llm=llm_factory(),
             controller=controller,
         )
@@ -186,6 +191,11 @@ class Step:
 class Pick(Step):
     pick: str
 
+    @property
+    def task_instructions(self) -> str:
+        """Instructions for the LLM on how to perform a pick action."""
+        return f"Select from a dropdown menu or list. Find and pick the option '{self.pick}'. Do not submit after picking."
+
     @classmethod
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Pick":
         return cls(pick=content, verify=verify or [])
@@ -194,6 +204,11 @@ class Pick(Step):
 @dataclass
 class Submit(Step):
     submit: str
+
+    @property
+    def task_instructions(self) -> str:
+        """Instructions for the LLM on how to perform a submit action."""
+        return f"Find and submit a form by clicking the '{self.submit}' submit button or equivalent submission element."
 
     @classmethod
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Submit":
@@ -204,6 +219,11 @@ class Submit(Step):
 class Input(Step):
     input: str
 
+    @property
+    def task_instructions(self) -> str:
+        """Instructions for the LLM on how to perform an input action."""
+        return f"Input text into a field. Type '{self.input}' into the appropriate input field. Do not submit, just enter the information in the field."
+
     @classmethod
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Input":
         return cls(input=content, verify=verify or [])
@@ -213,6 +233,11 @@ class Input(Step):
 class Click(Step):
     click: str
 
+    @property
+    def task_instructions(self) -> str:
+        """Instructions for the LLM on how to perform a click action."""
+        return f"Find and click on the element described as '{self.click}'. This could be a button, link, or other clickable element."
+
     @classmethod
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Click":
         return cls(click=content, verify=verify or [])
@@ -221,6 +246,11 @@ class Click(Step):
 @dataclass
 class Wait(Step):
     wait: str | int
+
+    @property
+    def task_instructions(self) -> str:
+        """Instructions for the LLM on how to perform a wait action."""
+        return f"Wait for {self.wait} seconds without performing any actions. This allows time for page elements to load or animations to complete."
 
     @classmethod
     def from_content(
@@ -252,6 +282,11 @@ class Wait(Step):
 class Exec(Step):
     exec: str
 
+    @property
+    def task_instructions(self) -> str:
+        """Instructions for the LLM on how to perform an exec action."""
+        return "Execute a shell command on the server. This is a system operation that runs in the background and does not involve browser interaction."
+
     @classmethod
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Exec":
         return cls(exec=content, verify=verify or [])
@@ -280,6 +315,11 @@ class Exec(Step):
 @dataclass
 class Goto(Step):
     goto: str
+
+    @property
+    def task_instructions(self) -> str:
+        """Instructions for the LLM on how to perform a goto action."""
+        return f"Navigate to the URL '{self.goto}'. This is a browser navigation action that loads a new page."
 
     @classmethod
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Goto":
