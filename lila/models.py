@@ -49,10 +49,10 @@ class StepResult:
 class Step:
     verify: str | List[str]
 
-    @property
-    def task_instructions(self) -> str:
-        """Instructions for the LLM on how to perform this specific action."""
-        return f"Perform a {self.get_type()} action on {self.get_value()}."
+    @staticmethod
+    def task_instructions() -> str:
+        """Generic instructions for the LLM on how to perform this type of action."""
+        return "Perform the action as instructed. Focus only on completing this one action."
 
     def validate(self):
         pass
@@ -88,7 +88,7 @@ class Step:
         agent = Agent(
             enable_memory=False,
             browser_context=context,
-            task=f"Perform a VISUAL VERIFICATION ONLY of: {verification}. DO NOT perform any actions. Keep reason under 100 chars, be concise.",
+            task=f"<INSTRUCTIONS>\nPerform a VISUAL VERIFICATION ONLY of: {verification}.\nDO NOT perform any actions.\n</INSTRUCTIONS>\n\n<NOTES>\n- Keep reason under 100 chars, be concise.\n- Only report on what you can visually confirm is present or absent on the screen.\n</NOTES>",
             llm=llm_factory(),
             controller=controller,
         )
@@ -108,13 +108,54 @@ class Step:
     # Verifications are now handled directly in the handle method
 
     async def _handle_action(
-        self, context: BrowserContext, llm_factory: Callable[[], BaseChatModel]
+        self,
+        context: BrowserContext,
+        llm_factory: Callable[[], BaseChatModel],
+        prev_steps: Optional[List[str]] = None,
+        next_steps: Optional[List[str]] = None,
     ) -> ActionResult:
         controller = Controller(output_model=ActionResult)
+
+        # Build context section with previous and next steps
+        context_section = ""
+        if prev_steps or next_steps:
+            context_section = "<CONTEXT>\n"
+            if prev_steps and len(prev_steps) > 0:
+                context_section += "Previous steps:\n"
+                for i, step in enumerate(prev_steps):
+                    context_section += f"{i+1}. {step}\n"
+                context_section += "\n"
+
+            if next_steps and len(next_steps) > 0:
+                context_section += "Next steps:\n"
+                for i, step in enumerate(next_steps):
+                    context_section += f"{i+1}. {step}\n"
+                context_section += "\n"
+
+            context_section += "Note: This context is provided for your understanding only. The other steps will be executed by other agents. You should ONLY perform the action specified in your job description.\n"
+            context_section += "</CONTEXT>\n\n"
+
         agent = Agent(
             enable_memory=False,
             browser_context=context,
-            task=f"Attempt this action: {self.get_type()} {self.get_value()}. {self.task_instructions} Follow instructions exactly, no alternative approaches. Keep reason under 100 chars, be concise.",
+            task=f"""Your job is to perform ONLY this action: {self.get_type()} {self.get_value()}.
+
+{context_section}<INSTRUCTIONS>
+{self.task_instructions()}
+</INSTRUCTIONS>
+
+<NOTES>
+- You need to respond if you were able to perform the action or not, with a reason.
+- Not being able to complete the action can be due to:
+    - The action is not possible to perform in the current context.
+    - The elements were not found
+    - Elements are not interactable
+    - or any other reason preventing you from performing the action.
+- If you encounter a popup, banner, captcha, etc. that blocks you from attempting the action, you are allowed to perform other actions to unblock the main action.
+- In all other cases, you are not allowed to perform any other action than the one specified.
+- Keep the output reason under 100 chars, be concise, regardless if the actions was successful or not.
+</NOTES>
+""",
             llm=llm_factory(),
             controller=controller,
         )
@@ -136,9 +177,13 @@ class Step:
         context: BrowserContext,
         config: Config,
         llm_factory: Callable[[], BaseChatModel],
+        prev_steps: Optional[List[str]] = None,
+        next_steps: Optional[List[str]] = None,
     ) -> StepResult:
         try:
-            action_result = await self._handle_action(context, llm_factory)
+            action_result = await self._handle_action(
+                context, llm_factory, prev_steps, next_steps
+            )
         except ValueError as e:
             logger.error(f"Error handling action: {e}")
             return StepResult(
@@ -191,10 +236,10 @@ class Step:
 class Pick(Step):
     pick: str
 
-    @property
-    def task_instructions(self) -> str:
+    @staticmethod
+    def task_instructions() -> str:
         """Instructions for the LLM on how to perform a pick action."""
-        return f"Select from a dropdown menu or list. Find and pick the option '{self.pick}'. Do not submit after picking."
+        return "Select from a dropdown menu or list. Find and pick the specified option. Do not submit after picking."
 
     @classmethod
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Pick":
@@ -205,10 +250,10 @@ class Pick(Step):
 class Submit(Step):
     submit: str
 
-    @property
-    def task_instructions(self) -> str:
+    @staticmethod
+    def task_instructions() -> str:
         """Instructions for the LLM on how to perform a submit action."""
-        return f"Find and submit a form by clicking the '{self.submit}' submit button or equivalent submission element."
+        return "Find and submit a form by clicking the specified submit button or equivalent submission element."
 
     @classmethod
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Submit":
@@ -219,10 +264,10 @@ class Submit(Step):
 class Input(Step):
     input: str
 
-    @property
-    def task_instructions(self) -> str:
+    @staticmethod
+    def task_instructions() -> str:
         """Instructions for the LLM on how to perform an input action."""
-        return f"Input text into a field. Type '{self.input}' into the appropriate input field. Do not submit, just enter the information in the field."
+        return "Input the specified text into the appropriate input field. Do not submit after entering the text, just complete the input action."
 
     @classmethod
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Input":
@@ -233,10 +278,10 @@ class Input(Step):
 class Click(Step):
     click: str
 
-    @property
-    def task_instructions(self) -> str:
+    @staticmethod
+    def task_instructions() -> str:
         """Instructions for the LLM on how to perform a click action."""
-        return f"Find and click on the element described as '{self.click}'. This could be a button, link, or other clickable element."
+        return "Find and click on the specified element. This could be a button, link, or other clickable element."
 
     @classmethod
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Click":
@@ -247,10 +292,10 @@ class Click(Step):
 class Wait(Step):
     wait: str | int
 
-    @property
-    def task_instructions(self) -> str:
+    @staticmethod
+    def task_instructions() -> str:
         """Instructions for the LLM on how to perform a wait action."""
-        return f"Wait for {self.wait} seconds without performing any actions. This allows time for page elements to load or animations to complete."
+        return "Wait for the specified number of seconds without performing any actions. This allows time for page elements to load or animations to complete."
 
     @classmethod
     def from_content(
@@ -282,8 +327,8 @@ class Wait(Step):
 class Exec(Step):
     exec: str
 
-    @property
-    def task_instructions(self) -> str:
+    @staticmethod
+    def task_instructions() -> str:
         """Instructions for the LLM on how to perform an exec action."""
         return "Execute a shell command on the server. This is a system operation that runs in the background and does not involve browser interaction."
 
@@ -316,10 +361,10 @@ class Exec(Step):
 class Goto(Step):
     goto: str
 
-    @property
-    def task_instructions(self) -> str:
+    @staticmethod
+    def task_instructions() -> str:
         """Instructions for the LLM on how to perform a goto action."""
-        return f"Navigate to the URL '{self.goto}'. This is a browser navigation action that loads a new page."
+        return "Navigate to the specified URL. This is a browser navigation action that loads a new page."
 
     @classmethod
     def from_content(cls, content: str, verify: Optional[List[str]] = None) -> "Goto":
@@ -392,10 +437,30 @@ class TestCaseDef:
                     logger.debug(f"Step {idx+1}")
                     # Add action context flag for logging
                     with logger.contextualize(action=True):
+                        # Get all previous and next steps for context
+                        prev_steps = []
+                        next_steps = []
+
+                        # Collect all previous steps
+                        for i in range(0, idx):
+                            prev_step_obj = self.steps[i]
+                            prev_steps.append(
+                                f"{prev_step_obj.get_type()} {prev_step_obj.get_value()}"
+                            )
+
+                        # Collect all next steps
+                        for i in range(idx + 1, len(self.steps)):
+                            next_step_obj = self.steps[i]
+                            next_steps.append(
+                                f"{next_step_obj.get_type()} {next_step_obj.get_value()}"
+                            )
+
                         step_result = await step.handle(
                             context,
                             config,
                             llm_factory,
+                            prev_steps=prev_steps,
+                            next_steps=next_steps,
                         )
                     step_results.append(step_result)
 
